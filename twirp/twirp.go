@@ -116,29 +116,6 @@ func versionFromEnv() string {
 	return "v0.0.0"
 }
 
-const stubTpl = `syntax = "proto3";
-
-package ttab.{{.Application}};
-
-option go_package = "./rpc/{{.Application}}";
-
-service {{.Service}} {
-  rpc {{.Method}}({{.Method}}Request) returns ({{.Method}}Response);
-}
-
-message {{.Method}}Request {
-  string param = 1;
-}
-
-message {{.Method}}Response {}
-`
-
-type stubData struct {
-	Application string
-	Service     string
-	Method      string
-}
-
 var applicationExp = regexp.MustCompile(`^[a-z][0-9a-z_]*$`)
 
 var (
@@ -190,4 +167,27 @@ func Stub(application, service, method string) error {
 	}
 
 	return nil
+}
+
+const stubTpl = `syntax = "proto3";
+
+package ttab.{{.Application}};
+
+option go_package = "./rpc/{{.Application}}";
+
+service {{.Service}} {
+  rpc {{.Method}}({{.Method}}Request) returns ({{.Method}}Response);
+}
+
+message {{.Method}}Request {
+  string param = 1;
+}
+
+message {{.Method}}Response {}
+`
+
+type stubData struct {
+	Application string
+	Service     string
+	Method      string
 }

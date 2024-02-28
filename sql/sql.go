@@ -45,20 +45,6 @@ func TernCommand() func(args ...string) error {
 	)
 }
 
-func mustGetConnString() string {
-	connString := os.Getenv("CONN_STRING")
-	if connString == "" {
-		cwd := internal.MustGetWD()
-		name := filepath.Base(cwd)
-
-		connString = fmt.Sprintf(
-			"postgres://%s:pass@localhost/%s",
-			name, name)
-	}
-
-	return connString
-}
-
 // Generate uses sqlc to compile the SQL queries in postgres/queries.sql to Go,
 // adding he default sqlc.yaml file if necessary.
 func Generate() error {
@@ -230,4 +216,18 @@ func DB(name string) error {
 	}
 
 	return nil
+}
+
+func mustGetConnString() string {
+	connString := os.Getenv("CONN_STRING")
+	if connString == "" {
+		cwd := internal.MustGetWD()
+		name := filepath.Base(cwd)
+
+		connString = fmt.Sprintf(
+			"postgres://%s:pass@localhost/%s",
+			name, name)
+	}
+
+	return connString
 }
