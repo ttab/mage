@@ -2,6 +2,7 @@ package sql
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/magefile/mage/sh"
+	"github.com/ttab/mage/internal"
 )
 
 const (
@@ -17,42 +19,36 @@ const (
 	postgresImage = "docker.io/pgvector/pgvector:pg16"
 )
 
-func sqlcCommand() func(args ...string) error {
+// SqlcCommand returns a command function that runs sqlc in docker with the
+// current working directory mounted.
+func SqlcCommand() func(args ...string) error {
 	uid := os.Getuid()
 	gid := os.Getgid()
-	cwd := mustGetWD()
+	cwd := internal.MustGetWD()
 
 	return sh.RunCmd("docker", "run", "--rm",
 		"-v", fmt.Sprintf("%s:/usr/src", cwd),
 		"-u", fmt.Sprintf("%d:%d", uid, gid),
-		"--network", "host",
-		sqlTools, "tern",
+		sqlTools, "sqlc",
 	)
 }
 
-func ternCommand() func(args ...string) error {
-	cwd := mustGetWD()
+// SqlcCommand returns a command function that runs tern in docker with host
+// networking and the current working directory mounted.
+func TernCommand() func(args ...string) error {
+	cwd := internal.MustGetWD()
 
 	return sh.RunCmd("docker", "run", "--rm",
 		"-v", fmt.Sprintf("%s:/usr/src", cwd),
 		"--network", "host",
 		sqlTools, "tern",
 	)
-}
-
-func mustGetWD() string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		panic(fmt.Errorf("get current directory: %w", err))
-	}
-
-	return cwd
 }
 
 func mustGetConnString() string {
 	connString := os.Getenv("CONN_STRING")
 	if connString == "" {
-		cwd := mustGetWD()
+		cwd := internal.MustGetWD()
 		name := filepath.Base(cwd)
 
 		connString = fmt.Sprintf(
@@ -63,11 +59,49 @@ func mustGetConnString() string {
 	return connString
 }
 
+// Generate uses sqlc to compile the SQL queries in postgres/queries.sql to Go,
+// adding he default sqlc.yaml file if necessary.
+func Generate() error {
+	hasConfig, err := internal.FileExists("sqlc.yaml")
+	if err != nil {
+		return err
+	}
+
+	if !hasConfig {
+		err := SqlcConfig()
+		if err != nil {
+			return fmt.Errorf("add default config: %w", err)
+		}
+	}
+
+	sqlc := SqlcCommand()
+
+	err = sqlc("--experimental", "generate")
+	if err != nil {
+		return fmt.Errorf("sqlc: %w", err)
+	}
+
+	return nil
+}
+
+//go:embed sqlc.yaml
+var defaultSqlcConfig []byte
+
+// SqlcConfig adds the default sqlc config.
+func SqlcConfig() error {
+	err := os.WriteFile("sqlc.yaml", defaultSqlcConfig, 0o600)
+	if err != nil {
+		return fmt.Errorf("write sqlc.yaml: %w", err)
+	}
+
+	return nil
+}
+
 // Migrate the database to the latest version using the migrations in
 // "./schema".
 func Migrate() error {
 	connString := mustGetConnString()
-	tern := ternCommand()
+	tern := TernCommand()
 
 	err := tern("migrate", "--migrations", "schema",
 		"--conn-string", connString)
@@ -86,7 +120,7 @@ func Migrate() error {
 // Rollback to the specific schema version.
 func Rollback(to int) error {
 	connString := mustGetConnString()
-	tern := ternCommand()
+	tern := TernCommand()
 
 	err := tern("migrate", "--migrations", "schema",
 		"--conn-string", connString,
