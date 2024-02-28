@@ -11,10 +11,10 @@ Import in your "magefiles/magefile.go" to add the tasks:
 package main
 
 import (
-	//mage:import sql
-	_ "github.com/ttab/mage/sql"
+    //mage:import sql
+    _ "github.com/ttab/mage/sql"
     //mage:import twirp
-	_ "github.com/ttab/mage/twirp"
+    _ "github.com/ttab/mage/twirp"
 )
 ```
 
