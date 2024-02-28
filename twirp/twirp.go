@@ -2,11 +2,13 @@ package twirp
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"text/template"
 
 	"github.com/magefile/mage/sh"
@@ -45,9 +47,9 @@ func Generate(name string) error {
 		return err
 	}
 
-	tool := TwirpTools()
+	version := versionFromEnv()
 
-	version := "v0.0.0"
+	tool := TwirpTools()
 
 	err = tool("protoc",
 		"--go_out=.",
@@ -62,7 +64,56 @@ func Generate(name string) error {
 		return fmt.Errorf("run protoc: %w", err)
 	}
 
+	specPath := filepath.Join(
+		"docs", name+"-openapi.json",
+	)
+
+	specData, err := os.ReadFile(specPath)
+	if err != nil {
+		return fmt.Errorf("read openapi spec: %w", err)
+	}
+
+	var spec map[string]interface{}
+
+	err = json.Unmarshal(specData, &spec)
+	if err != nil {
+		return fmt.Errorf("unmarshal openapi spec: %w", err)
+	}
+
+	spec["servers"] = []map[string]interface{}{
+		{
+			"url": fmt.Sprintf("https://%s.api.tt.se", name),
+		},
+		{
+			"url": fmt.Sprintf("https://%s.stage.api.tt.se", name),
+		},
+	}
+
+	specData, err = json.MarshalIndent(spec, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal openapi spec: %w", err)
+	}
+
+	err = os.WriteFile(specPath, specData, 0o600)
+	if err != nil {
+		return fmt.Errorf("write openapi spec: %w", err)
+	}
+
 	return nil
+}
+
+func versionFromEnv() string {
+	version := os.Getenv("API_VERSION")
+	if version != "" {
+		return version
+	}
+
+	v, err := internal.OutputSilent("git", "describe", "--tags", "HEAD")
+	if err == nil {
+		return strings.TrimSpace(v)
+	}
+
+	return "v0.0.0"
 }
 
 const stubTpl = `syntax = "proto3";
