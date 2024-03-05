@@ -46,7 +46,7 @@ DB calls DBWithName using the current directory name as the database name.
 
 ### `sql:dbwithname` "name"
 
-reates a local database and login role with the same name and the password 'pass'.
+Creates a local database and login role with the same name and the password 'pass'.
 
 ### `sql:migrate`
 
