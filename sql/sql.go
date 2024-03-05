@@ -135,7 +135,8 @@ func DumpSchema() error {
 	ok, err := sh.Exec(nil, outFile, os.Stderr,
 		"docker", "run", "--rm", "--network", "host",
 		postgresImage,
-		"pg_dump", connString, "--schema-only",
+		"pg_dump", connString,
+		"--schema-only", "--no-owner", "--no-privileges",
 	)
 	if err != nil {
 		return fmt.Errorf("run pg_dump: %w", err)
