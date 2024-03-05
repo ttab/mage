@@ -1,6 +1,6 @@
 # Mage tasks
 
-Reusable mage tasks.
+Reusable [mage](https://magefile.org/) tasks.
 
 Import in your "magefiles/magefile.go" to add the tasks:
 
