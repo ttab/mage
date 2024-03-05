@@ -163,15 +163,22 @@ func Postgres(name string) error {
 		stateDir = filepath.Join(homeDir, "localstate")
 	}
 
-	dataDir := filepath.Join(stateDir, "postgres-"+name)
+	instanceName := "postgres-" + name
+
+	dataDir := filepath.Join(stateDir, instanceName)
 
 	err := os.MkdirAll(dataDir, 0o700)
 	if err != nil {
 		return fmt.Errorf("create local state directory: %w", err)
 	}
 
+	err = internal.StopContainerIfExists(instanceName)
+	if err != nil {
+		return fmt.Errorf("stop existing container: %w", err)
+	}
+
 	err = sh.Run("docker", "run", "-d", "--rm",
-		"--name", "postgres-"+name,
+		"--name", instanceName,
 		"--user", fmt.Sprintf("%d:%d", uid, gid),
 		"-e", "POSTGRES_USER=admin",
 		"-e", "POSTGRES_PASSWORD=pass",

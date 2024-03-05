@@ -15,6 +15,8 @@ import (
     _ "github.com/ttab/mage/sql"
     //mage:import twirp
     _ "github.com/ttab/mage/twirp"
+    //mage:import s3
+    _ "github.com/ttab/mage/s3"
 )
 ```
 
@@ -36,9 +38,9 @@ Generate runs protoc to compile the service declaration and generate an openapi3
 
 Generate uses sqlc to compile the SQL queries in postgres/queries.sql to Go, adding he default sqlc.yaml file if necessary.
 
-### `sql:postgres`
+### `sql:postgres` "name"
 
-Postgres creates a local Postgres instance using docker.
+Postgres creates a local Postgres instance using docker. Data will be stored in "~/localstate/postgres-[name]".
 
 ### `sql:db`
 
@@ -63,3 +65,17 @@ mage sql:rollback 1
 ### `sql:dumpschema`
 
 DumpSchema writes the current database schema to "./postgres/schema.sql".
+
+## S3 tasks
+
+### `s3:minio`
+
+Minio creates a local minio instance using docker. Data will be stored in "~/localstate/minio".
+
+Exposes an S3 compatible endpoint on http://localhost:9000 and a web GUI on http://localhost:9001.
+
+Use minioadmin/minioadmin to log in, or as access key/secret for the API.
+
+### `s3:bucket` "name"
+
+Creates a bucket in the local minio instance.
