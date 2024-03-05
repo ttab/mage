@@ -189,9 +189,17 @@ func Postgres(name string) error {
 	return nil
 }
 
-// DB creates a database and login role with the same name and the password
-// 'pass'.
-func DB(name string) error {
+// DB calls DBWithName using the current directory name as the database name.
+func DB() error {
+	cwd := internal.MustGetWD()
+	name := filepath.Base(cwd)
+
+	return DBWithName(name)
+}
+
+// DBWithName creates a database and login role with the same name and the
+// password 'pass'.
+func DBWithName(name string) error {
 	ctx := context.Background()
 
 	conn, err := pgx.Connect(ctx, "postgres://admin:pass@localhost")
