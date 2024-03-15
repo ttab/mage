@@ -85,7 +85,7 @@ func Generate(name string) error {
 			"url": fmt.Sprintf("https://%s.api.tt.se", name),
 		},
 		{
-			"url": fmt.Sprintf("https://%s.stage.api.tt.se", name),
+			"url": fmt.Sprintf("https://%s.api.stage.tt.se", name),
 		},
 	}
 
