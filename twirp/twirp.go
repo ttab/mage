@@ -55,11 +55,13 @@ func Generate(name string) error {
 		"--go_out=.",
 		"--twirp_out=.",
 		"--openapi3_out=./docs",
+		"--proto_path="+"rpc/"+name,
+		"--proto_path=rpc",
 		fmt.Sprintf(
 			"--openapi3_opt=application=%s,version=%s",
 			name, version,
 		),
-		filepath.Join("rpc", name, "service.proto"))
+		"rpc/"+name+"/service.proto")
 	if err != nil {
 		return fmt.Errorf("run protoc: %w", err)
 	}
