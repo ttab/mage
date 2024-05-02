@@ -20,20 +20,15 @@ func Minio() error {
 	uid := os.Getuid()
 	gid := os.Getgid()
 
-	stateDir := os.Getenv("STATE_DIR")
-	if stateDir == "" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("get home directory: %w", err)
-		}
-
-		stateDir = filepath.Join(homeDir, "localstate")
+	stateDir, err := internal.StateDir()
+	if err != nil {
+		return fmt.Errorf("get state directory path: %w", err)
 	}
 
 	instanceName := "local-minio"
 	dataDir := filepath.Join(stateDir, instanceName)
 
-	err := os.MkdirAll(dataDir, 0o700)
+	err = os.MkdirAll(dataDir, 0o700)
 	if err != nil {
 		return fmt.Errorf("create local state directory: %w", err)
 	}
