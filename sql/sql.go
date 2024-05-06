@@ -86,7 +86,7 @@ func SqlcConfig() error {
 // Migrate the database to the latest version using the migrations in
 // "./schema".
 func Migrate() error {
-	connString := mustGetConnString()
+	connString := MustGetConnString()
 	tern := TernCommand()
 
 	err := tern("migrate", "--migrations", "schema",
@@ -105,7 +105,7 @@ func Migrate() error {
 
 // Rollback to the specific schema version.
 func Rollback(to int) error {
-	connString := mustGetConnString()
+	connString := MustGetConnString()
 	tern := TernCommand()
 
 	err := tern("migrate", "--migrations", "schema",
@@ -125,7 +125,7 @@ func Rollback(to int) error {
 
 // DumpSchema writes the current database schema to "./postgres/schema.sql".
 func DumpSchema() error {
-	connString := mustGetConnString()
+	connString := MustGetConnString()
 
 	outFile, err := os.Create(filepath.Join("postgres", "schema.sql"))
 	if err != nil {
@@ -229,7 +229,7 @@ func DBWithName(name string) error {
 	return nil
 }
 
-func mustGetConnString() string {
+func MustGetConnString() string {
 	connString := os.Getenv("CONN_STRING")
 	if connString == "" {
 		cwd := internal.MustGetWD()
