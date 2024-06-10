@@ -5,7 +5,7 @@ go 1.22.0
 require (
 	github.com/jackc/pgx/v5 v5.5.5
 	github.com/magefile/mage v1.15.0
-	github.com/minio/minio-go/v7 v7.0.70
+	github.com/minio/minio-go/v7 v7.0.71
 )
 
 require (
