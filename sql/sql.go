@@ -229,6 +229,15 @@ func DBWithName(name string) error {
 	return nil
 }
 
+// ConnString prints the connection string for use with psql like so:
+//
+//	psql $(mage sql:connstring)
+func ConnString() error {
+	_, _ = fmt.Fprintln(os.Stdout, MustGetConnString())
+
+	return nil
+}
+
 func MustGetConnString() string {
 	connString := os.Getenv("CONN_STRING")
 	if connString == "" {
