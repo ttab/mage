@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	twirpToolsImage = "ghcr.io/ttab/elephant-twirptools:v8.1.3-1"
+	twirpToolsImage = "ghcr.io/ttab/elephant-twirptools:v8.1.3-3"
 )
 
 // TwirpTools returns a command function that runs programs from the
@@ -34,12 +34,47 @@ func TwirpTools() func(args ...string) error {
 	)
 }
 
-// Generate runs protoc to compile the service declaration and generate an
-// openapi3 specification.
-func Generate(name string) error {
-	err := internal.EnsureDirectory(filepath.Join("rpc", name))
+// Generate runs protoc to compile the service declarations and generate
+// openapi3 specifications for the services in the project.
+func Generate() error {
+	protoRoot := "."
+
+	rpcRooted, err := internal.DirectoryExists("rpc")
 	if err != nil {
-		return err
+		return fmt.Errorf("check for './rpc' directory: %w", err)
+	}
+
+	if rpcRooted {
+		protoRoot = "rpc"
+	}
+
+	protoFiles, err := filepath.Glob(filepath.Join(protoRoot, "*", "service.proto"))
+	if err != nil {
+		return fmt.Errorf("glob for proto services: %w", err)
+	}
+
+	for _, p := range protoFiles {
+		service := filepath.Base(filepath.Dir(p))
+
+		err := generateService(service)
+		if err != nil {
+			return fmt.Errorf("generate %q: %w", service, err)
+		}
+	}
+
+	return nil
+}
+
+func generateService(name string) error {
+	protoRoot := "."
+
+	rpcRooted, err := internal.DirectoryExists("rpc")
+	if err != nil {
+		return fmt.Errorf("check for './rpc' directory: %w", err)
+	}
+
+	if rpcRooted {
+		protoRoot = "rpc"
 	}
 
 	err = internal.EnsureDirectory("docs")
@@ -51,17 +86,26 @@ func Generate(name string) error {
 
 	tool := TwirpTools()
 
-	err = tool("protoc",
+	protocArgs := []string{
+		"protoc",
 		"--go_out=.",
 		"--twirp_out=.",
 		"--openapi3_out=./docs",
-		"--proto_path="+"rpc/"+name,
-		"--proto_path=rpc",
+		"--proto_path", protoRoot,
 		fmt.Sprintf(
 			"--openapi3_opt=application=%s,version=%s",
 			name, version,
 		),
-		"rpc/"+name+"/service.proto")
+	}
+
+	protoFiles, err := filepath.Glob(filepath.Join(protoRoot, name, "*.proto"))
+	if err != nil {
+		return fmt.Errorf("glob for proto files: %w", err)
+	}
+
+	protocArgs = append(protocArgs, protoFiles...)
+
+	err = tool(protocArgs...)
 	if err != nil {
 		return fmt.Errorf("run protoc: %w", err)
 	}

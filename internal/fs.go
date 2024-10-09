@@ -18,6 +18,21 @@ func FileExists(path string) (bool, error) {
 	return true, nil
 }
 
+func DirectoryExists(path string) (bool, error) {
+	stat, err := os.Stat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, fmt.Errorf("stat file: %w", err)
+	}
+
+	if !stat.IsDir() {
+		return false, fmt.Errorf("%q is not a directory", path)
+	}
+
+	return true, nil
+}
+
 func EnsureDirectory(path string) error {
 	stat, err := os.Stat(path)
 	if errors.Is(err, fs.ErrNotExist) {
