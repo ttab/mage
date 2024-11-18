@@ -165,7 +165,7 @@ func versionFromEnv() string {
 var applicationExp = regexp.MustCompile(`^[a-z][0-9a-z_]*$`)
 
 var (
-	messageExp        = regexp.MustCompile(`^[A-Z][0-9a-za-z]*$`)
+	messageExp        = regexp.MustCompile(`^[A-Z][0-9a-zA-Z]*$`)
 	messageConstraint = "must start with an uppercase letter and only contain the characters a-z, A-Z, 0-9"
 )
 
@@ -179,7 +179,7 @@ func Stub(application, service, method string) error {
 		return fmt.Errorf("service %s", messageConstraint)
 	}
 
-	if !messageExp.MatchString(service) {
+	if !messageExp.MatchString(method) {
 		return fmt.Errorf("method %s", messageConstraint)
 	}
 
