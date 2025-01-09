@@ -22,16 +22,25 @@ const (
 // TwirpTools returns a command function that runs programs from the
 // elephant-twirptools image as the current user with the current working
 // directory mounted.
-func TwirpTools() func(args ...string) error {
+func TwirpTools(exposeDirs ...string) func(args ...string) error {
 	uid := os.Getuid()
 	gid := os.Getgid()
 	cwd := internal.MustGetWD()
 
-	return sh.RunCmd("docker", "run", "--rm",
+	args := []string{
+		"run", "--rm",
 		"-v", fmt.Sprintf("%s:/usr/src", cwd),
 		"-u", fmt.Sprintf("%d:%d", uid, gid),
-		twirpToolsImage,
-	)
+	}
+
+	for _, p := range exposeDirs {
+		args = append(args,
+			"-v", fmt.Sprintf("%s:%s", p, p))
+	}
+
+	args = append(args, twirpToolsImage)
+
+	return sh.RunCmd("docker", args...)
 }
 
 // Generate runs protoc to compile the service declarations and generate
@@ -84,8 +93,6 @@ func generateService(name string) error {
 
 	version := versionFromEnv()
 
-	tool := TwirpTools()
-
 	protocArgs := []string{
 		"protoc",
 		"--go_out=.",
@@ -98,12 +105,26 @@ func generateService(name string) error {
 		),
 	}
 
+	var toolDirs []string
+
+	// If we have elephant API as a dependency, automatically add it to the
+	// proto path.
+	eleAPI := tryElephantAPIDir()
+	if eleAPI != "" {
+		toolDirs = append(toolDirs, eleAPI)
+
+		protocArgs = append(protocArgs,
+			"--proto_path", eleAPI)
+	}
+
 	protoFiles, err := filepath.Glob(filepath.Join(protoRoot, name, "*.proto"))
 	if err != nil {
 		return fmt.Errorf("glob for proto files: %w", err)
 	}
 
 	protocArgs = append(protocArgs, protoFiles...)
+
+	tool := TwirpTools(toolDirs...)
 
 	err = tool(protocArgs...)
 	if err != nil {
@@ -146,6 +167,17 @@ func generateService(name string) error {
 	}
 
 	return nil
+}
+
+func tryElephantAPIDir() string {
+	elephantAPIDir, err := sh.Output("go", "list", "-m",
+		"-f", "{{.Dir}}",
+		"github.com/ttab/elephant-api")
+	if err != nil {
+		return ""
+	}
+
+	return elephantAPIDir
 }
 
 func versionFromEnv() string {
