@@ -100,7 +100,7 @@ func generateService(name string) error {
 		"--twirp_out=.",
 		"--twirp_opt=paths=source_relative",
 		"--openapi3_out=./docs",
-		"--proto_path", protoRoot,
+		"--proto_path=.",
 		fmt.Sprintf(
 			"--openapi3_opt=application=%s,version=%s",
 			name, version,
