@@ -96,7 +96,9 @@ func generateService(name string) error {
 	protocArgs := []string{
 		"protoc",
 		"--go_out=.",
+		"--go_opt=paths=source_relative",
 		"--twirp_out=.",
+		"--twirp_opt=paths=source_relative",
 		"--openapi3_out=./docs",
 		"--proto_path", protoRoot,
 		fmt.Sprintf(
