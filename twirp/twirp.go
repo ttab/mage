@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	twirpToolsImage = "ghcr.io/ttab/elephant-twirptools:v8.1.3-3"
+	twirpToolsImage = "ghcr.io/ttab/elephant-twirptools:v8.1.3-4"
 )
 
 // TwirpTools returns a command function that runs programs from the
