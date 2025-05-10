@@ -16,7 +16,7 @@ import (
 
 const (
 	sqlTools      = "ghcr.io/ttab/elephant-sqltools:v0.1.3"
-	postgresImage = "docker.io/pgvector/pgvector:pg16"
+	postgresImage = "docker.io/pgvector/pgvector:pg17"
 )
 
 // SqlcCommand returns a command function that runs sqlc in docker with the
