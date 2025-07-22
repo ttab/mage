@@ -8,9 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/magefile/mage/sh"
+	"github.com/ttab/mage/ia"
 	"github.com/ttab/mage/internal"
 )
 
@@ -250,4 +252,49 @@ func MustGetConnString() string {
 	}
 
 	return connString
+}
+
+// GrantReporting grants read access to the provided tables. The user will be
+// prompted for the reporting role and connection string.
+func GrantReporting(ctx context.Context, tables []string) error {
+	if len(tables) == 0 {
+		return errors.New("no tables provided")
+	}
+
+	role, err := ia.PromptForValueWithDefault(
+		"Reporting role", "elephant_reporting_user")
+	if err != nil {
+		return fmt.Errorf("get reporting role: %w", err)
+	}
+
+	connStr, err := ia.PromptForValue("Enter connection string", true)
+	if err != nil {
+		return fmt.Errorf("get connection string: %w", err)
+	}
+
+	conn, err := pgx.Connect(ctx, connStr)
+	if err != nil {
+		return fmt.Errorf("connect to database: %w", err)
+	}
+
+	quoted := make([]string, len(tables))
+
+	for i := range tables {
+		quoted[i] = quoteIdentifier(tables[i])
+	}
+
+	_, err = conn.Exec(ctx, fmt.Sprintf(
+		"GRANT SELECT ON %s TO %s",
+		strings.Join(quoted, ","),
+		quoteIdentifier(role),
+	))
+	if err != nil {
+		return fmt.Errorf("grant select: %w", err)
+	}
+
+	return nil
+}
+
+func quoteIdentifier(s string) string {
+	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
 }
