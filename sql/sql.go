@@ -202,6 +202,14 @@ func DB() error {
 	return DBWithName(name)
 }
 
+// DropDB calls DropDBWithName using the current directory name as the database name.
+func DropDB() error {
+	cwd := internal.MustGetWD()
+	name := filepath.Base(cwd)
+
+	return DropDBWithName(name)
+}
+
 // DBWithName creates a database and login role with the same name and the
 // password 'pass'.
 func DBWithName(name string) error {
@@ -226,6 +234,32 @@ func DBWithName(name string) error {
 	))
 	if err != nil {
 		return fmt.Errorf("create database: %w", err)
+	}
+
+	return nil
+}
+
+// DropDBWithName drops the database and login role with the same name.
+func DropDBWithName(name string) error {
+	ctx := context.Background()
+
+	conn, err := pgx.Connect(ctx, "postgres://admin:pass@localhost")
+	if err != nil {
+		return fmt.Errorf("connect to database: %w", err)
+	}
+
+	_, err = conn.Exec(ctx, fmt.Sprintf(
+		"DROP DATABASE %q", name,
+	))
+	if err != nil {
+		return fmt.Errorf("drop database: %w", err)
+	}
+
+	_, err = conn.Exec(ctx, fmt.Sprintf(
+		"DROP ROLE %q", name,
+	))
+	if err != nil {
+		return fmt.Errorf("drop login role: %w", err)
 	}
 
 	return nil
