@@ -1,6 +1,8 @@
 package sql
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	_ "embed"
 	"errors"
@@ -134,7 +136,10 @@ func DumpSchema() error {
 		return fmt.Errorf("create schema file: %w", err)
 	}
 
-	ok, err := sh.Exec(nil, outFile, os.Stderr,
+	// Buffer for keeping the dumped schema in memory for postprocessing.
+	var buf bytes.Buffer
+
+	ok, err := sh.Exec(nil, &buf, os.Stderr,
 		"docker", "run", "--rm", "--network", "host",
 		postgresImage,
 		"pg_dump", connString,
@@ -148,7 +153,56 @@ func DumpSchema() error {
 		return errors.New("failed to run pg_dump in docker")
 	}
 
+	// Scanner that will read the dumped schema line by line.
+	scan := bufio.NewScanner(&buf)
+
+	var (
+		restrict   = []byte("\\restrict")
+		unrestrict = []byte("\\unrestrict")
+		nl         = []byte("\n")
+	)
+
+	var writeErr error
+
+	for scan.Scan() {
+		line := scan.Bytes()
+
+		// Ignore the \restrict and \unrestrict directives.
+		if hasAnyPrefix(line, restrict, unrestrict) {
+			continue
+		}
+
+		_, writeErr = outFile.Write(line)
+		if writeErr != nil {
+			break
+		}
+
+		_, writeErr = outFile.Write(nl)
+		if writeErr != nil {
+			break
+		}
+	}
+
+	if writeErr != nil {
+		return fmt.Errorf("write to schema.sql: %w", writeErr)
+	}
+
+	readErr := scan.Err()
+	if readErr != nil {
+		return fmt.Errorf("read from database dump: %w", readErr)
+	}
+
 	return nil
+}
+
+func hasAnyPrefix(line []byte, prefixes ...[]byte) bool {
+	for _, p := range prefixes {
+		if bytes.HasPrefix(line, p) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Postgres creates a local Postgres instance using docker.
