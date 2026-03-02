@@ -28,27 +28,43 @@ This will allow you to run the sql targets using: `mage sql:target-name`.
 
 Stub generates a protobuf service stub in `rpc/[application]/service.proto`.
 
-### `twirp:generate` "name"
+### `twirp:generate`
 
-Generate runs protoc to compile the service declaration and generate an openapi3 specification.
+Generate auto-discovers all `rpc/*/service.proto` files, runs protoc to compile the service declarations, and generates openapi3 specifications. The version is resolved from the last ancestor git tag.
+
+### `twirp:release` "version"
+
+Release runs the same protoc compilation and openapi3 generation as `twirp:generate`, but uses the provided version string instead of resolving it from git tags.
 
 ## SQL tasks
 
 ### `sql:generate`
 
-Generate uses sqlc to compile the SQL queries in postgres/queries.sql to Go, adding he default sqlc.yaml file if necessary.
+Generate uses sqlc to compile the SQL queries in postgres/queries.sql to Go, adding the default sqlc.yaml file if necessary.
+
+### `sql:sqlcConfig`
+
+SqlcConfig adds the default sqlc.yaml configuration file.
 
 ### `sql:postgres` "name"
 
-Postgres creates a local Postgres instance using docker. Data will be stored in "~/localstate/postgres-[name]".
+Postgres creates a local Postgres instance using docker. Data will be stored under the platform data directory (e.g. `~/.local/share/tt-mage/postgres-[name]` on Linux, `~/Library/tt-mage/postgres-[name]` on macOS). Override with the `STATE_DIR` environment variable.
 
 ### `sql:db`
 
 DB calls DBWithName using the current directory name as the database name.
 
-### `sql:dbwithname` "name"
+### `sql:dbWithName` "name"
 
 Creates a local database and login role with the same name and the password 'pass'.
+
+### `sql:dropDB`
+
+DropDB calls DropDBWithName using the current directory name as the database name.
+
+### `sql:dropDBWithName` "name"
+
+Drops the database and login role with the given name.
 
 ### `sql:migrate`
 
@@ -62,15 +78,33 @@ Rollback to a specific schema version:
 mage sql:rollback 1
 ```
 
-### `sql:dumpschema`
+### `sql:connString`
+
+Prints the connection string for use with psql:
+
+``` shell
+psql $(mage sql:connString)
+```
+
+### `sql:dumpSchema`
 
 DumpSchema writes the current database schema to "./postgres/schema.sql".
+
+### `sql.GrantReporting`
+
+GrantReporting is a reusable function (not a standalone target) that grants SELECT on the provided tables to a reporting role. It prompts interactively for the role name and connection string. Wrap it in your magefile to expose it as a target:
+
+``` go
+func GrantReporting(ctx context.Context) error {
+    return sql.GrantReporting(ctx, []string{"my_table", "other_table"})
+}
+```
 
 ## S3 tasks
 
 ### `s3:minio`
 
-Minio creates a local minio instance using docker. Data will be stored in "~/localstate/minio".
+Minio creates a local minio instance using docker. Data will be stored under the platform data directory (e.g. `~/.local/share/tt-mage/local-minio` on Linux, `~/Library/tt-mage/local-minio` on macOS).
 
 Exposes an S3 compatible endpoint on http://localhost:9000 and a web GUI on http://localhost:9001.
 

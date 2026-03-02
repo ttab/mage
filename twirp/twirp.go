@@ -44,8 +44,27 @@ func TwirpTools(exposeDirs ...string) func(args ...string) error {
 }
 
 // Generate runs protoc to compile the service declarations and generate
-// openapi3 specifications for the services in the project.
+// openapi3 specifications for the services in the project. The version is
+// resolved from the last ancestor git tag.
 func Generate() error {
+	v, err := internal.OutputSilent("git", "describe", "--tags", "--abbrev=0")
+	if err != nil {
+		return fmt.Errorf("resolve version from git tags: %w", err)
+	}
+
+	version := strings.TrimSpace(v)
+
+	return generateAll(version)
+}
+
+// Release runs protoc to compile the service declarations and generate
+// openapi3 specifications for the services in the project using the provided
+// version string.
+func Release(version string) error {
+	return generateAll(version)
+}
+
+func generateAll(version string) error {
 	protoRoot := "."
 
 	rpcRooted, err := internal.DirectoryExists("rpc")
@@ -65,7 +84,7 @@ func Generate() error {
 	for _, p := range protoFiles {
 		service := filepath.Base(filepath.Dir(p))
 
-		err := generateService(service)
+		err := generateService(service, version)
 		if err != nil {
 			return fmt.Errorf("generate %q: %w", service, err)
 		}
@@ -74,7 +93,7 @@ func Generate() error {
 	return nil
 }
 
-func generateService(name string) error {
+func generateService(name, version string) error {
 	protoRoot := "."
 
 	rpcRooted, err := internal.DirectoryExists("rpc")
@@ -90,8 +109,6 @@ func generateService(name string) error {
 	if err != nil {
 		return err
 	}
-
-	version := versionFromEnv()
 
 	protocArgs := []string{
 		"protoc",
@@ -180,20 +197,6 @@ func tryElephantAPIDir() string {
 	}
 
 	return elephantAPIDir
-}
-
-func versionFromEnv() string {
-	version := os.Getenv("API_VERSION")
-	if version != "" {
-		return version
-	}
-
-	v, err := internal.OutputSilent("git", "describe", "--tags", "HEAD")
-	if err == nil {
-		return strings.TrimSpace(v)
-	}
-
-	return "v0.0.0"
 }
 
 var applicationExp = regexp.MustCompile(`^[a-z][0-9a-z_]*$`)
