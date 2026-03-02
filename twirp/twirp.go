@@ -61,7 +61,15 @@ func Generate() error {
 // openapi3 specifications for the services in the project using the provided
 // version string.
 func Release(version string) error {
-	return generateAll(version)
+	err := generateAll(version)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("\nAdd and commit the changed files, then tag the release:")
+	fmt.Printf("\n  git tag %s\n\n", version)
+
+	return nil
 }
 
 func generateAll(version string) error {
