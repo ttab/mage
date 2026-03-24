@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -381,6 +382,20 @@ func GrantReporting(ctx context.Context, tables []string) error {
 	}
 
 	return nil
+}
+
+// GrantReportingFromJSON unmarshals a JSON array of table names and grants
+// read access to them. The user will be prompted for the reporting role and
+// connection string.
+func GrantReportingFromJSON(ctx context.Context, data []byte) error {
+	var tables []string
+
+	err := json.Unmarshal(data, &tables)
+	if err != nil {
+		return fmt.Errorf("unmarshal reporting tables: %w", err)
+	}
+
+	return GrantReporting(ctx, tables)
 }
 
 func quoteIdentifier(s string) string {
