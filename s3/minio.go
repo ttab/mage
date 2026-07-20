@@ -60,12 +60,14 @@ func Minio() error {
 	ctx := context.Background()
 
 	deadline := time.Now().Add(20 * time.Second)
+
 	for {
 		_, err := client.BucketExists(ctx, "randomname")
 		if err != nil && time.Now().After(deadline) {
-			return fmt.Errorf("failed to ensure that minio is available: %w", err)
+			return fmt.Errorf("ensure that minio is available: %w", err)
 		} else if err != nil {
 			time.Sleep(300 * time.Millisecond)
+
 			continue
 		}
 

@@ -55,7 +55,7 @@ func TernCommand() func(args ...string) error {
 func Generate() error {
 	hasConfig, err := internal.FileExists("sqlc.yaml")
 	if err != nil {
-		return err
+		return fmt.Errorf("check for sqlc config: %w", err)
 	}
 
 	if !hasConfig {

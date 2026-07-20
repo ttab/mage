@@ -19,10 +19,10 @@ const (
 	twirpToolsImage = "ghcr.io/ttab/elephant-twirptools:v8.1.3-4"
 )
 
-// TwirpTools returns a command function that runs programs from the
+// Tools returns a command function that runs programs from the
 // elephant-twirptools image as the current user with the current working
 // directory mounted.
-func TwirpTools(exposeDirs ...string) func(args ...string) error {
+func Tools(exposeDirs ...string) func(args ...string) error {
 	uid := os.Getuid()
 	gid := os.Getgid()
 	cwd := internal.MustGetWD()
@@ -66,8 +66,10 @@ func Release(version string) error {
 		return err
 	}
 
-	fmt.Println("\nAdd and commit the changed files, then tag the release:")
-	fmt.Printf("\n  git tag %s\n\n", version)
+	// This is a CLI target whose whole purpose is to instruct the user, so
+	// writing to stdout is intentional here.
+	fmt.Println("\nAdd and commit the changed files, then tag the release:") //nolint:forbidigo
+	fmt.Printf("\n  git tag %s\n\n", version)                                //nolint:forbidigo
 
 	return nil
 }
@@ -115,7 +117,7 @@ func generateService(name, version string) error {
 
 	err = internal.EnsureDirectory("docs")
 	if err != nil {
-		return err
+		return fmt.Errorf("ensure docs directory: %w", err)
 	}
 
 	protocArgs := []string{
@@ -151,7 +153,7 @@ func generateService(name, version string) error {
 
 	protocArgs = append(protocArgs, protoFiles...)
 
-	tool := TwirpTools(toolDirs...)
+	tool := Tools(toolDirs...)
 
 	err = tool(protocArgs...)
 	if err != nil {
@@ -167,14 +169,14 @@ func generateService(name, version string) error {
 		return fmt.Errorf("read openapi spec: %w", err)
 	}
 
-	var spec map[string]interface{}
+	var spec map[string]any
 
 	err = json.Unmarshal(specData, &spec)
 	if err != nil {
 		return fmt.Errorf("unmarshal openapi spec: %w", err)
 	}
 
-	spec["servers"] = []map[string]interface{}{
+	spec["servers"] = []map[string]any{
 		{
 			"url": fmt.Sprintf("https://%s.api.tt.se", name),
 		},
@@ -229,9 +231,10 @@ func Stub(application, service, method string) error {
 	}
 
 	dir := filepath.Join("rpc", application)
+
 	err := internal.EnsureDirectory(dir)
 	if err != nil {
-		return err
+		return fmt.Errorf("ensure application directory: %w", err)
 	}
 
 	tpl, err := template.New("skeleton").Parse(stubTpl)

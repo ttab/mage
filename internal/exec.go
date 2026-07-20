@@ -13,5 +13,6 @@ import (
 func OutputSilent(cmd string, args ...string) (string, error) {
 	buf := &bytes.Buffer{}
 	_, err := sh.Exec(nil, buf, io.Discard, cmd, args...)
+
 	return strings.TrimSuffix(buf.String(), "\n"), err
 }

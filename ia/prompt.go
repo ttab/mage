@@ -13,7 +13,9 @@ import (
 func PromptForValue(prompt string, failOnEmpty bool) (string, error) {
 	reader := bufio.NewReader(os.Stdin)
 
-	fmt.Printf("%s: ", prompt)
+	// Writing the prompt to stdout is the whole point of an interactive
+	// prompt helper.
+	fmt.Printf("%s: ", prompt) //nolint:forbidigo
 
 	response, err := reader.ReadString('\n')
 	if err != nil {
