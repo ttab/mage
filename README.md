@@ -17,6 +17,8 @@ import (
     _ "github.com/ttab/mage/twirp"
     //mage:import s3
     _ "github.com/ttab/mage/s3"
+    //mage:import docs
+    _ "github.com/ttab/mage/docs"
 )
 ```
 
@@ -113,3 +115,20 @@ Use minioadmin/minioadmin to log in, or as access key/secret for the API.
 ### `s3:bucket` "name"
 
 Creates a bucket in the local minio instance.
+
+## Documentation tasks
+
+### `docs:links`
+
+Checks that every relative link and heading anchor in the repository's markdown files resolves: that the path names a file that exists, and that a `#anchor` names a heading the target document actually has. Run from the repository root.
+
+Only relative links are checked — following external URLs would make the check depend on the network and on other people's uptime. Anchors are resolved with GitHub's slug rules, since GitHub is where the documentation is read, and headings inside fenced code blocks are not treated as headings.
+
+Worth wiring into CI wherever documentation is cross-referenced by section, since a renamed heading breaks inbound links that nothing else notices:
+
+``` yaml
+- name: Check documentation links
+  run: go run github.com/magefile/mage docs:links
+```
+
+The checker itself is `github.com/ttab/mage/doclint`, which can be called directly from a test if you would rather have it fail there than in a mage target.
