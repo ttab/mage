@@ -10,12 +10,19 @@
 //
 // Anchors are resolved with GitHub's slug rules, since GitHub is where the
 // documentation is read.
+//
+// Only the repository's own documentation is checked: in a git worktree the
+// file list comes from git, so ignored files are left alone. Build output, a
+// vendored dependency or a virtualenv under the repository root is full of
+// markdown whose links are somebody else's to fix.
 package doclint
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -39,7 +46,9 @@ func (p Problem) String() string {
 	return fmt.Sprintf("%s:%d: %s: %s", p.File, p.Line, p.Link, p.Reason)
 }
 
-// skipDirs are never walked: nothing in them is documentation we own.
+// skipDirs are never walked: nothing in them is documentation we own. They
+// only matter outside a git worktree, where there are no ignore rules to go
+// by.
 var skipDirs = map[string]bool{
 	".git":         true,
 	"node_modules": true,
@@ -73,7 +82,70 @@ func CheckDir(root string) ([]Problem, error) {
 	return problems, nil
 }
 
+// markdownFiles returns the root-relative paths of the markdown files to
+// check, letting git decide which files are the repository's own.
 func markdownFiles(root string) ([]string, error) {
+	entries, err := gitFiles(root)
+	if err != nil {
+		// Not a worktree, or no git to ask. Walking checks more files
+		// than the listing would, never fewer, so falling back costs
+		// noise rather than coverage.
+		return walkMarkdownFiles(root)
+	}
+
+	var files []string
+
+	for _, entry := range entries {
+		if !strings.EqualFold(filepath.Ext(entry), ".md") {
+			continue
+		}
+
+		// A tracked file can be absent from the worktree, and a
+		// submodule is listed as a single entry that is a directory.
+		info, err := os.Stat(filepath.Join(root, entry))
+		if err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+
+		files = append(files, entry)
+	}
+
+	return files, nil
+}
+
+// gitFiles returns the paths git knows about under root, relative to root:
+// the tracked files plus the untracked ones that no ignore rule covers. The
+// ignore rules are git's own whole set, so a developer's global excludes count
+// as well as the repository's .gitignore files.
+func gitFiles(root string) ([]string, error) {
+	cmd := exec.Command("git", "-C", root, "ls-files", "-z",
+		"--cached", "--others", "--exclude-standard")
+
+	out, err := cmd.Output()
+	if err != nil {
+		exit, ok := errors.AsType[*exec.ExitError](err)
+		if ok {
+			return nil, fmt.Errorf("list the files in %q: %w: %s",
+				root, err, strings.TrimSpace(string(exit.Stderr)))
+		}
+
+		return nil, fmt.Errorf("list the files in %q: %w", root, err)
+	}
+
+	var files []string
+
+	for entry := range strings.SplitSeq(string(out), "\x00") {
+		if entry == "" {
+			continue
+		}
+
+		files = append(files, filepath.FromSlash(entry))
+	}
+
+	return files, nil
+}
+
+func walkMarkdownFiles(root string) ([]string, error) {
 	var files []string
 
 	err := filepath.WalkDir(root, func(

@@ -124,6 +124,8 @@ Checks that every relative link and heading anchor in the repository's markdown 
 
 Only relative links are checked — following external URLs would make the check depend on the network and on other people's uptime. Anchors are resolved with GitHub's slug rules, since GitHub is where the documentation is read, and headings inside fenced code blocks are not treated as headings.
 
+Only the repository's own documentation is checked. In a git worktree the file list comes from `git ls-files`, so anything an ignore rule covers — build output, a vendored dependency, a virtualenv under the repository root — is left alone, as are files ignored by a developer's global excludes. Outside a worktree, or with no `git` on the path, the directory is walked instead.
+
 Worth wiring into CI wherever documentation is cross-referenced by section, since a renamed heading breaks inbound links that nothing else notices:
 
 ``` yaml

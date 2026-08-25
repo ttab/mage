@@ -2,6 +2,7 @@ package doclint_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -124,6 +125,52 @@ func TestCheckDirShellCommentIsNotAnAnchor(t *testing.T) {
 	if len(problems) != 1 {
 		t.Fatalf("got %d problems, want 1:\n%s",
 			len(problems), format(problems))
+	}
+}
+
+// TestCheckDirSkipsIgnoredFiles pins the reason the file list comes from git:
+// a virtualenv or a vendored dependency under the repository root brings its
+// own markdown, whose broken links are not ours to fix.
+func TestCheckDirSkipsIgnoredFiles(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not available")
+	}
+
+	dir := t.TempDir()
+
+	write(t, dir, ".gitignore", ".venv/\n")
+	write(t, dir, "README.md", "# Title\n\n[broken](nope.md)\n")
+	write(t, dir, ".venv/vendored/README.md", "# Vendored\n\n[broken](nope.md)\n")
+
+	gitInit(t, dir)
+
+	problems, err := doclint.CheckDir(dir)
+	if err != nil {
+		t.Fatalf("check dir: %v", err)
+	}
+
+	if len(problems) != 1 || problems[0].File != "README.md" {
+		t.Fatalf("got %d problems, want only the one in README.md:\n%s",
+			len(problems), format(problems))
+	}
+}
+
+func gitInit(t *testing.T, dir string) {
+	t.Helper()
+
+	// The commands are the minimum that makes ls-files work: a worktree,
+	// and nothing that needs a user identity.
+	for _, args := range [][]string{
+		{"init"},
+		{"add", "."},
+	} {
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v: %s",
+				strings.Join(args, " "), err, out)
+		}
 	}
 }
 
