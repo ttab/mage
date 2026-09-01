@@ -546,7 +546,13 @@ func trimNumber(name string) string {
 }
 
 // generatedHeader marks a flattened schema so that nobody edits it by hand.
-const generatedHeader = "-- Generated from the tern migrations in %s by\n" +
+//
+// It deliberately names no path. The header used to carry the migration
+// directory, which made the output depend on where the command was run from:
+// `mage sql:librarySchema pg/schema pg/schema.sql` at a repository root and
+// CheckFlattened("schema", "schema.sql") from inside the package are the same
+// operation on the same files, and they disagreed.
+const generatedHeader = "-- Generated from this package's tern migrations by\n" +
 	"-- `mage sql:librarySchema`. Do not edit.\n\n"
 
 // Flatten writes the "create above" halves of a migration directory into a
@@ -584,13 +590,32 @@ func CheckFlattened(migrationsDir, out string) error {
 		return fmt.Errorf("read %s: %w", out, err)
 	}
 
-	if string(got) != want {
+	// Compare the SQL rather than the whole file, so that a change to the
+	// header wording does not read as schema drift in every library that
+	// has generated one.
+	if statements(string(got)) != statements(want) {
 		return fmt.Errorf(
 			"%s no longer matches the migrations in %s: run `mage sql:librarySchema`",
 			out, migrationsDir)
 	}
 
 	return nil
+}
+
+// statements drops the generated header, leaving what actually has to match.
+func statements(schema string) string {
+	lines := strings.SplitAfter(schema, "\n")
+
+	for i, line := range lines {
+		t := strings.TrimSpace(line)
+		if t == "" || strings.HasPrefix(t, "--") {
+			continue
+		}
+
+		return strings.Join(lines[i:], "")
+	}
+
+	return ""
 }
 
 func flatten(migrationsDir string) (string, error) {
@@ -615,7 +640,7 @@ func flatten(migrationsDir string) (string, error) {
 	// migration order, which is the order the statements have to appear in.
 	var b strings.Builder
 
-	fmt.Fprintf(&b, generatedHeader, migrationsDir)
+	b.WriteString(generatedHeader)
 
 	for i, name := range names {
 		data, err := os.ReadFile(filepath.Join(migrationsDir, name))

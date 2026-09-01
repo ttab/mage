@@ -320,3 +320,38 @@ func TestFlattenRefusesAMigrationWithoutASeparator(t *testing.T) {
 		t.Error("flatten accepted a migration with no up/down separator")
 	}
 }
+
+func TestFlattenDoesNotDependOnWhereItIsRunFrom(t *testing.T) {
+	// The same operation on the same files, expressed with different
+	// relative paths, has to produce the same file — a mage target invoked
+	// at a repository root and a test calling CheckFlattened from inside the
+	// package are exactly that.
+	root := t.TempDir()
+
+	pkg := filepath.Join(root, "pg")
+	migrations := filepath.Join(pkg, "schema")
+
+	if err := os.MkdirAll(migrations, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	err := os.WriteFile(filepath.Join(migrations, "001_a.sql"),
+		[]byte("CREATE TABLE a();\n\n"+libschema.TernSeparator+"\n\nDROP TABLE a;\n"), 0o600)
+	if err != nil {
+		t.Fatalf("write migration: %v", err)
+	}
+
+	out := filepath.Join(pkg, "schema.sql")
+
+	// Written with the long path, as the mage target would from a root.
+	if err := libschema.Flatten(migrations, out); err != nil {
+		t.Fatalf("flatten: %v", err)
+	}
+
+	// Checked with the short path, as a test in the package would.
+	t.Chdir(pkg)
+
+	if err := libschema.CheckFlattened("schema", "schema.sql"); err != nil {
+		t.Errorf("the same schema failed the check from another directory: %v", err)
+	}
+}
