@@ -9,7 +9,11 @@ import (
 	"github.com/ttab/mage/libschema"
 )
 
-const libMigration = `CREATE TABLE howdah_session(id bytea PRIMARY KEY);
+// libMigration opens with a comment of its own, which is what a real library
+// migration looks like and what the header parser used to swallow.
+const libMigration = `-- One row per session. The id is a hash of the handle, so a
+-- database dump yields nothing anybody can log in with.
+CREATE TABLE howdah_session(id bytea PRIMARY KEY);
 
 ---- create above / drop below ----
 
@@ -353,5 +357,43 @@ func TestFlattenDoesNotDependOnWhereItIsRunFrom(t *testing.T) {
 
 	if err := libschema.CheckFlattened("schema", "schema.sql"); err != nil {
 		t.Errorf("the same schema failed the check from another directory: %v", err)
+	}
+}
+
+func TestVendoringAMigrationThatOpensWithAComment(t *testing.T) {
+	// The regression: the header used to be recognised as "the comments
+	// before the first statement", so a library migration with a comment of
+	// its own had that comment stripped along with the header. The copy then
+	// differed from its source the instant it was written, and the check
+	// reported an edit nobody had made — which is the failure most likely to
+	// get a drift check ignored.
+	dir, mod := fixture(t, nil)
+
+	added, err := libschema.VendorWith(dir, mod)
+	if err != nil {
+		t.Fatalf("vendor: %v", err)
+	}
+
+	if len(added) != 1 {
+		t.Fatalf("added %d, want 1", len(added))
+	}
+
+	problems, err := libschema.CheckWith(dir, mod)
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+
+	if len(problems) != 0 {
+		t.Fatalf("a freshly vendored file does not check out: %v", problems)
+	}
+
+	// And the copy has to still carry the library's own comment.
+	data, err := os.ReadFile(added[0].Path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+
+	if !strings.Contains(string(data), "One row per session") {
+		t.Error("the vendored copy lost the library migration's own comment")
 	}
 }

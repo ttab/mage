@@ -400,21 +400,24 @@ func check(
 	return problems, nil
 }
 
+// headerEnd terminates the provenance header.
+//
+// The header cannot be recognised as "the comments before the first
+// statement": a library's migration very often opens with a comment of its
+// own explaining the table, and stripping that too made the copy differ from
+// its source the moment it was written. A marker is unambiguous, and removing
+// it is itself an edit.
+const headerEnd = "-- vendored-end"
+
 // vendoredBody returns a vendored file's contents with the provenance header
 // stripped, which is what has to match the library's own file.
 func vendoredBody(data []byte) string {
-	lines := strings.SplitAfter(string(data), "\n")
-
-	for i, line := range lines {
-		t := strings.TrimSpace(line)
-		if t == "" || strings.HasPrefix(t, "--") {
-			continue
-		}
-
-		return strings.Join(lines[i:], "")
+	_, body, found := strings.Cut(string(data), headerEnd+"\n")
+	if !found {
+		return ""
 	}
 
-	return ""
+	return strings.TrimPrefix(body, "\n")
 }
 
 // GoModuleDir resolves a module path to its directory on disk, which for a
@@ -513,7 +516,8 @@ func vendor(
 				"-- knows about a migration inside a dependency.\n"+
 				"--\n"+
 				"-- Managed by `mage sql:vendor`. Do not edit: change it in the\n"+
-				"-- library, as a new migration.\n\n",
+				"-- library, as a new migration.\n"+
+				headerEnd+"\n\n",
 			s.ref(), s.sum)
 
 		err := os.WriteFile(path, append([]byte(header), s.content...), 0o600)
