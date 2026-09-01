@@ -9,6 +9,13 @@ import (
 	"github.com/ttab/mage/libschema"
 )
 
+// libModule and libSchemaDir are the fixture library and the migration
+// directory within it.
+const (
+	libModule    = "github.com/ttab/howdah"
+	libSchemaDir = "tokenstore/pgstore/schema"
+)
+
 // libMigration opens with a comment of its own, which is what a real library
 // migration looks like and what the header parser used to swallow.
 const libMigration = `-- One row per session. The id is a hash of the handle, so a
@@ -29,7 +36,7 @@ func fixture(t *testing.T, appFiles map[string]string) (string, func(string) (st
 
 	schemaDir := filepath.Join(root, "schema")
 	libRoot := filepath.Join(root, "lib")
-	libDir := filepath.Join(libRoot, "tokenstore", "pgstore", "schema")
+	libDir := filepath.Join(libRoot, filepath.FromSlash(libSchemaDir))
 
 	for _, d := range []string{schemaDir, libDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -52,7 +59,7 @@ func fixture(t *testing.T, appFiles map[string]string) (string, func(string) (st
 	}
 
 	return schemaDir, func(module string) (string, error) {
-		if module != "github.com/ttab/howdah" {
+		if module != libModule {
 			t.Fatalf("unexpected module %q", module)
 		}
 
@@ -395,5 +402,124 @@ func TestVendoringAMigrationThatOpensWithAComment(t *testing.T) {
 
 	if !strings.Contains(string(data), "One row per session") {
 		t.Error("the vendored copy lost the library migration's own comment")
+	}
+}
+
+// addFixture is the fixture without a vendor.json, since declaring the
+// library is what is under test.
+func addFixture(t *testing.T) (string, func(string) (string, error)) {
+	t.Helper()
+
+	schemaDir, mod := fixture(t, nil)
+
+	err := os.Remove(filepath.Join(schemaDir, libschema.ConfigName))
+	if err != nil {
+		t.Fatalf("remove the config: %v", err)
+	}
+
+	return schemaDir, mod
+}
+
+func TestAddLibraryWritesTheFirstDeclaration(t *testing.T) {
+	dir, mod := addFixture(t)
+
+	added, err := libschema.AddLibraryWith(dir, libschema.Library{
+		Module: libModule,
+		Dir:    libSchemaDir,
+	}, mod)
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+
+	if !added {
+		t.Error("got added=false for a library that was not declared")
+	}
+
+	conf, err := libschema.LoadConfig(dir)
+	if err != nil {
+		t.Fatalf("load the config: %v", err)
+	}
+
+	if len(conf.Libraries) != 1 ||
+		conf.Libraries[0].Dir != libSchemaDir {
+		t.Fatalf("got %v, want the one library", conf.Libraries)
+	}
+
+	// Vendoring must work straight off the declaration, since that is the
+	// next thing anybody runs.
+	vendored, err := libschema.VendorWith(dir, mod)
+	if err != nil {
+		t.Fatalf("vendor: %v", err)
+	}
+
+	if len(vendored) != 1 {
+		t.Errorf("got %d vendored files, want 1", len(vendored))
+	}
+}
+
+func TestAddLibraryIsIdempotent(t *testing.T) {
+	dir, mod := addFixture(t)
+
+	lib := libschema.Library{
+		Module: libModule,
+		// A dir that needs cleaning, so that a second run spelled the
+		// tidy way still recognises it.
+		Dir: libSchemaDir + "/",
+	}
+
+	_, err := libschema.AddLibraryWith(dir, lib, mod)
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+
+	lib.Dir = libSchemaDir
+
+	added, err := libschema.AddLibraryWith(dir, lib, mod)
+	if err != nil {
+		t.Fatalf("add again: %v", err)
+	}
+
+	if added {
+		t.Error("got added=true for a library that was already declared")
+	}
+
+	conf, err := libschema.LoadConfig(dir)
+	if err != nil {
+		t.Fatalf("load the config: %v", err)
+	}
+
+	if len(conf.Libraries) != 1 {
+		t.Errorf("got %d libraries, want 1", len(conf.Libraries))
+	}
+}
+
+func TestAddLibraryRefusesADirWithNoMigrations(t *testing.T) {
+	dir, mod := addFixture(t)
+
+	// The typo has to fail here: written to the config it would surface as
+	// somebody else's check failure, a bump or two later.
+	_, err := libschema.AddLibraryWith(dir, libschema.Library{
+		Module: libModule,
+		Dir:    "tokenstore/pgstore/schemas",
+	}, mod)
+	if err == nil {
+		t.Fatal("got no error for a dir that ships no migrations")
+	}
+
+	_, err = os.Stat(filepath.Join(dir, libschema.ConfigName))
+	if !os.IsNotExist(err) {
+		t.Errorf("the config was written anyway: %v", err)
+	}
+}
+
+func TestAddLibraryRefusesAPathOutsideTheModule(t *testing.T) {
+	dir, mod := addFixture(t)
+
+	_, err := libschema.AddLibraryWith(dir, libschema.Library{
+		Module: libModule,
+		Dir:    "../../etc",
+	}, mod)
+	if err == nil {
+		t.Fatal("got no error for a dir outside the module")
 	}
 }

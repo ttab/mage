@@ -40,6 +40,9 @@ Release runs the same protoc compilation and openapi3 generation as `twirp:gener
 
 ## SQL tasks
 
+Vendoring a library's tern migrations into a service spans several of these
+targets; [docs/schema-vendoring.md](docs/schema-vendoring.md) is the overview.
+
 ### `sql:generate`
 
 Generate uses sqlc to compile the SQL queries in postgres/queries.sql to Go, adding the default sqlc.yaml file if necessary.
@@ -72,31 +75,26 @@ Drops the database and login role with the given name.
 
 Migrate the database to the latest version using the migrations in "./schema".
 
+### `sql:vendorAdd` "module" "dir"
+
+Declares a library's tern migration directory in `schema/vendor.json`, so that
+`sql:vendor` starts copying its migrations in:
+
+``` shell
+mage sql:vendorAdd github.com/ttab/howdah tokenstore/pgstore/schema
+```
+
+See [Declaring the library](docs/schema-vendoring.md#declaring-the-library-sqlvendoradd).
+
 ### `sql:vendor`
 
 Copies the tern migrations declared in `schema/vendor.json` out of their
-libraries and into `./schema`.
-
-A library that needs a table of its own cannot get it created: both
-`sql:migrate` and elephant-platform's `setup db migrate` apply exactly the
-files in a service's `./schema`, and neither looks inside a dependency. So the
-library's migrations are copied in, and the copy carries a `vendored-from`
-and a `vendored-sha256` header so the check below can tell whether it is
-current.
+libraries and into `./schema`, which is the only place either `sql:migrate` or
+elephant-platform's `setup db migrate` looks — neither of them sees a migration
+inside a dependency.
 
 It only ever adds files, and it numbers them after the migrations already
-there rather than after the library's own numbering.
-
-``` json
-{
-  "libraries": [
-    {
-      "module": "github.com/ttab/howdah",
-      "dir": "tokenstore/pgstore/schema"
-    }
-  ]
-}
-```
+there. See [Making the copies](docs/schema-vendoring.md#making-the-copies-sqlvendor).
 
 ### `sql:vendorCheck`
 
@@ -106,22 +104,11 @@ prevents is quiet, since a service that bumps a library past a new migration
 builds, tests and deploys before failing at runtime on a table nobody created.
 
 It distinguishes four cases, because the fixes differ and one of them is
-emphatically not "run vendor again":
-
-| Problem | Fix |
-|---|---|
-| not vendored | `mage sql:vendor`, or a `-- covers:` comment where a migration already does the work by hand |
-| vendored copy edited | make the change in the library, as a new migration |
-| library rewrote an applied migration | the library adds a new migration — re-vendoring is a silent no-op wherever the old one has run |
-| vendored from a migration that no longer exists | restore it upstream; an applied migration cannot be withdrawn |
-
-A service that wrote the DDL by hand before the library shipped a migration
-says so in the file that did the work, which is the only thing that can work
-when the statement is one of several in a migration that does other things:
-
-``` sql
--- covers: github.com/ttab/elephantine pg/schema/001_job_lock.sql
-```
+emphatically not "run vendor again". See [What the check
+reports](docs/schema-vendoring.md#what-the-check-reports), and [DDL the service
+already wrote by
+hand](docs/schema-vendoring.md#ddl-the-service-already-wrote-by-hand) for the
+`-- covers:` escape hatch.
 
 ### `sql:librarySchema` "migrationsDir" "out"
 
@@ -130,8 +117,8 @@ read. Writes the "create above" halves of the migrations into one file, in
 migration order, so the library does not hold the same DDL twice with nothing
 keeping the copies together.
 
-`libschema.CheckFlattened` is the same comparison as a test, so a new
-migration cannot land without the schema sqlc reads following it.
+See [The flat schema sqlc
+reads](docs/schema-vendoring.md#the-flat-schema-sqlc-reads-sqllibraryschema).
 
 ### `sql:rollback` N
 

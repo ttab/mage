@@ -45,6 +45,39 @@ func Vendor() error {
 	return nil
 }
 
+// VendorAdd declares a library's migration directory in schema/vendor.json,
+// so that `mage sql:vendor` starts copying its migrations in.
+//
+// For a library whose migrations live in "tokenstore/pgstore/schema", that is:
+//
+//	mage sql:vendorAdd github.com/ttab/howdah tokenstore/pgstore/schema
+//
+// The declaration is explicit rather than inferred from the module graph: a
+// dependency must not be able to add a table to a service's database without
+// somebody in the service agreeing to it.
+func VendorAdd(module string, dir string) error {
+	lib := libschema.Library{Module: module, Dir: dir}
+
+	added, err := libschema.AddLibrary(schemaDir, lib)
+	if err != nil {
+		return fmt.Errorf("declare %s: %w", lib, err)
+	}
+
+	if !added {
+		_, _ = fmt.Fprintf(os.Stdout,
+			"%s is already declared in %s/%s\n",
+			lib, schemaDir, libschema.ConfigName)
+
+		return nil
+	}
+
+	_, _ = fmt.Fprintf(os.Stdout,
+		"added %s to %s/%s\n\nRun `mage sql:vendor` to copy its migrations into ./%s.\n",
+		lib, schemaDir, libschema.ConfigName, schemaDir)
+
+	return nil
+}
+
 // VendorCheck fails when a library migration declared in schema/vendor.json
 // is not covered by this service's own migrations.
 //

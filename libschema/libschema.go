@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -85,6 +86,80 @@ func LoadConfig(schemaDir string) (Config, error) {
 	}
 
 	return conf, nil
+}
+
+// AddLibrary declares a library's migration directory in a schema
+// directory's vendor.json, creating the file if this is the first one.
+//
+// It resolves the module and reads the directory before writing anything, so
+// a typo fails here rather than in the next person's check run. The return
+// value says whether it added the library; an entry that is already there is
+// not an error, so the call is safe to repeat.
+//
+// It does not copy anything — run Vendor for that.
+func AddLibrary(schemaDir string, lib Library) (bool, error) {
+	return addLibrary(schemaDir, lib, GoModuleDir)
+}
+
+func addLibrary(
+	schemaDir string, lib Library, moduleDir func(string) (string, error),
+) (bool, error) {
+	if lib.Module == "" || lib.Dir == "" {
+		return false, errors.New("both a module and a dir are needed")
+	}
+
+	// The dir is relative to the module root and slash-separated: it names a
+	// path inside the read-only module cache, and it is read back on
+	// whatever platform the next developer runs.
+	lib.Dir = path.Clean(filepath.ToSlash(lib.Dir))
+
+	if path.IsAbs(lib.Dir) || lib.Dir == ".." ||
+		strings.HasPrefix(lib.Dir, "../") {
+		return false, fmt.Errorf(
+			"%q is not a path within the module", lib.Dir)
+	}
+
+	info, err := os.Stat(schemaDir)
+	if err != nil {
+		return false, fmt.Errorf(
+			"read %s: %w (run this from the service root)", schemaDir, err)
+	}
+
+	if !info.IsDir() {
+		return false, fmt.Errorf("%s is not a directory", schemaDir)
+	}
+
+	conf, err := LoadConfig(schemaDir)
+	if err != nil {
+		return false, err
+	}
+
+	for _, existing := range conf.Libraries {
+		if existing.Module == lib.Module && existing.Dir == lib.Dir {
+			return false, nil
+		}
+	}
+
+	_, err = readSources(Config{Libraries: []Library{lib}}, moduleDir)
+	if err != nil {
+		return false, err
+	}
+
+	conf.Libraries = append(conf.Libraries, lib)
+
+	data, err := json.MarshalIndent(conf, "", "  ")
+	if err != nil {
+		return false, fmt.Errorf("marshal %s: %w", ConfigName, err)
+	}
+
+	confPath := filepath.Join(schemaDir, ConfigName)
+
+	err = os.WriteFile(confPath, append(data, '\n'), 0o600)
+	if err != nil {
+		return false, fmt.Errorf("write %s: %w", confPath, err)
+	}
+
+	return true, nil
 }
 
 // source is one migration a library ships.
