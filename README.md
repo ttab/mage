@@ -72,6 +72,67 @@ Drops the database and login role with the given name.
 
 Migrate the database to the latest version using the migrations in "./schema".
 
+### `sql:vendor`
+
+Copies the tern migrations declared in `schema/vendor.json` out of their
+libraries and into `./schema`.
+
+A library that needs a table of its own cannot get it created: both
+`sql:migrate` and elephant-platform's `setup db migrate` apply exactly the
+files in a service's `./schema`, and neither looks inside a dependency. So the
+library's migrations are copied in, and the copy carries a `vendored-from`
+and a `vendored-sha256` header so the check below can tell whether it is
+current.
+
+It only ever adds files, and it numbers them after the migrations already
+there rather than after the library's own numbering.
+
+``` json
+{
+  "libraries": [
+    {
+      "module": "github.com/ttab/howdah",
+      "dir": "tokenstore/pgstore/schema"
+    }
+  ]
+}
+```
+
+### `sql:vendorCheck`
+
+Fails when a library migration declared in `schema/vendor.json` is not covered
+by the service's own migrations. Wire it into lint or a test: the failure it
+prevents is quiet, since a service that bumps a library past a new migration
+builds, tests and deploys before failing at runtime on a table nobody created.
+
+It distinguishes four cases, because the fixes differ and one of them is
+emphatically not "run vendor again":
+
+| Problem | Fix |
+|---|---|
+| not vendored | `mage sql:vendor`, or a `-- covers:` comment where a migration already does the work by hand |
+| vendored copy edited | make the change in the library, as a new migration |
+| library rewrote an applied migration | the library adds a new migration — re-vendoring is a silent no-op wherever the old one has run |
+| vendored from a migration that no longer exists | restore it upstream; an applied migration cannot be withdrawn |
+
+A service that wrote the DDL by hand before the library shipped a migration
+says so in the file that did the work, which is the only thing that can work
+when the statement is one of several in a migration that does other things:
+
+``` sql
+-- covers: github.com/ttab/elephantine pg/schema/001_job_lock.sql
+```
+
+### `sql:librarySchema` "migrationsDir" "out"
+
+For a library that ships migrations and also needs a flat schema for sqlc to
+read. Writes the "create above" halves of the migrations into one file, in
+migration order, so the library does not hold the same DDL twice with nothing
+keeping the copies together.
+
+`libschema.CheckFlattened` is the same comparison as a test, so a new
+migration cannot land without the schema sqlc reads following it.
+
 ### `sql:rollback` N
 
 Rollback to a specific schema version:
