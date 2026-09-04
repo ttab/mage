@@ -112,10 +112,10 @@ func VendorCheck() error {
 // LibrarySchema writes the flat schema sqlc reads from a library's own tern
 // migrations, so the library does not hold the same DDL twice.
 //
-// For a library whose migrations live in "pg/schema" and whose sqlc input is
-// "pg/schema.sql", that is:
+// For a library whose migrations live in "pg/joblock/schema" and whose sqlc
+// input is "pg/joblock/schema.sql", that is:
 //
-//	mage sql:librarySchema pg/schema pg/schema.sql
+//	mage sql:librarySchema pg/joblock/schema pg/joblock/schema.sql
 func LibrarySchema(migrationsDir, out string) error {
 	err := libschema.Flatten(migrationsDir, out)
 	if err != nil {

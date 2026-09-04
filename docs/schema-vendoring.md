@@ -226,7 +226,7 @@ that would fail on a table that already exists.
 Such a service says so in the file that did the work:
 
 ``` sql
--- covers: github.com/ttab/elephantine pg/schema/001_job_lock.sql
+-- covers: github.com/ttab/elephantine pg/joblock/schema/001_job_lock.sql
 ```
 
 The reference is the module path and the migration's path within the module,
@@ -274,13 +274,13 @@ to read. Holding the same DDL twice, with nothing keeping the copies together,
 is exactly the drift vendoring exists to stop — one level further in.
 
 ``` shell
-mage sql:librarySchema pg/schema pg/schema.sql
+mage sql:librarySchema pg/joblock/schema pg/joblock/schema.sql
 ```
 
-That writes the "create above" halves of every migration in `pg/schema` into
-`pg/schema.sql`, in migration order, under a header saying it is generated. A
-migration without the separator is an error, since its up half cannot be told
-from its down half.
+That writes the "create above" halves of every migration in
+`pg/joblock/schema` into `pg/joblock/schema.sql`, in migration order, under a
+header saying it is generated. A migration without the separator is an error,
+since its up half cannot be told from its down half.
 
 Wire the same comparison into a test so a new migration cannot land without
 the schema sqlc reads following it:

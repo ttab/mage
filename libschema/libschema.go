@@ -628,9 +628,9 @@ func trimNumber(name string) string {
 //
 // It deliberately names no path. The header used to carry the migration
 // directory, which made the output depend on where the command was run from:
-// `mage sql:librarySchema pg/schema pg/schema.sql` at a repository root and
-// CheckFlattened("schema", "schema.sql") from inside the package are the same
-// operation on the same files, and they disagreed.
+// `mage sql:librarySchema pg/joblock/schema pg/joblock/schema.sql` at a
+// repository root and CheckFlattened("schema", "schema.sql") from inside the
+// package are the same operation on the same files, and they disagreed.
 const generatedHeader = "-- Generated from this package's tern migrations by\n" +
 	"-- `mage sql:librarySchema`. Do not edit.\n\n"
 
