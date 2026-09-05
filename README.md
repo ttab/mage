@@ -13,8 +13,8 @@ package main
 import (
     //mage:import sql
     _ "github.com/ttab/mage/sql"
-    //mage:import twirp
-    _ "github.com/ttab/mage/twirp"
+    //mage:import rpc
+    _ "github.com/ttab/mage/rpc"
     //mage:import s3
     _ "github.com/ttab/mage/s3"
     //mage:import docs
@@ -24,7 +24,124 @@ import (
 
 This will allow you to run the sql targets using: `mage sql:target-name`.
 
+## RPC tasks
+
+Compiles protobuf service declarations into Go, with [buf](https://buf.build/)
+as the compiler. It replaces the `twirp` namespace, which ran protoc inside the
+`elephant-twirptools` image: buf and every plugin run as
+`go run <module>@<version>` with the versions pinned in the `rpc` package, so
+generating needs no Docker, installs nothing, and takes nothing off `PATH`. A
+generator moves when this module is bumped, and the regenerated files show up
+in the bump's diff. No `buf.gen.yaml` is committed anywhere — the generation
+template is passed to buf inline.
+
+The targets discover services as `<proto root>/*/service.proto`, where the
+proto root is `rpc` when that directory exists and the repository root
+otherwise, and generate for every `.proto` file in a service's directory. A
+file that declares no service is compiled to messages and nothing else.
+
+Per service, into the service's own directory:
+
+| File | Plugin |
+|---|---|
+| `service.pb.go` | `protoc-gen-go` |
+| `<package>connect/service.connect.go` | `protoc-gen-connect-go` |
+| `<package>connect/service.elephant.go` | `protoc-gen-elephant-rpc` |
+| `service.twirp.go` | `protoc-gen-twirp`, when Twirp is on |
+| `docs/<service>-openapi.json` | `protoc-gen-openapi3`, when OpenAPI is on |
+
+`protoc-gen-elephant-rpc` emits the plain protobuf service interface and the
+Connect adapters that put Connect on it. It is skipped until elephantine has
+tagged a release containing it, so a repository generating today gets the first
+two plugins and, where it is turned on, Twirp.
+
+### `rpc:generate`
+
+Generate compiles the service declarations and generates the OpenAPI 3
+specifications. The version stamped into the specifications is resolved from
+the last ancestor git tag.
+
+### `rpc:release` "version"
+
+Release runs the same generation as `rpc:generate`, but stamps the provided
+version into the specifications instead of resolving it from the git tags.
+
+### `rpc:vendorProto` "module" "file"
+
+VendorProto copies a `.proto` file out of a Go module and into the
+repository's vendored proto root, `rpc/vendor`:
+
+``` shell
+mage rpc:vendorProto github.com/ttab/elephant-api newsdoc/newsdoc.proto
+```
+
+The compiler only sees the files in its workspace and a workspace cannot reach
+outside the repository, which is what protoc was doing when it was handed a
+dependency's module directory as a `--proto_path`. A vendored file keeps the
+path it has in the repository it came from, so the `import` in the service's
+own `.proto` does not change. The vendor directory becomes a module root of
+its own in the buf workspace, which is the one thing that makes the repository
+need a `buf.yaml`; the target writes it.
+
+The vendored file is compiled but never generated for — its Go code comes from
+the module it was vendored out of, which is where the service imports it from.
+
+`newsdoc/newsdoc.proto` is the only file the fleet vendors. It is generated
+from the `newsdoc` module, so the copy changes when that module does, and the
+target is idempotent: run it in CI and let `git diff --exit-code` report the
+drift.
+
+### `rpc:stub` "application" "Service" "MethodName"
+
+Stub generates a protobuf service stub in `[proto root]/[application]/service.proto`.
+
+### Configuration
+
+The exported variables of the `rpc` package are the configuration, set from
+the importing magefile:
+
+``` go
+import (
+    //mage:import rpc
+    "github.com/ttab/mage/rpc"
+)
+
+func init() {
+    // This repository still serves the /twirp/ paths.
+    rpc.Twirp = true
+}
+```
+
+| Variable | Environment | Default | Meaning |
+|---|---|---|---|
+| `rpc.Twirp` | `RPC_TWIRP` | off | Run `protoc-gen-twirp`. A new service is Connect only; an existing one turns it on for as long as it still serves the `/twirp/` paths. |
+| `rpc.OpenAPI` | `RPC_OPENAPI` | on | Write the OpenAPI 3 specifications to `./docs`. |
+| `rpc.VendorDir` | `RPC_VENDOR_DIR` | `rpc/vendor` | The proto root `rpc:vendorProto` copies into. |
+| `rpc.ExtraProtoRoots` | `RPC_EXTRA_PROTO_ROOTS` | none | Further directories to add to the buf workspace, for a repository that keeps protobuf sources outside the proto root. Their files are resolvable as imports and are not generated for. |
+| `rpc.ElephantRPCOptions` | — | none | Extra options for `protoc-gen-elephant-rpc`. The one to know about is `interface=true`, which makes it emit the plain service interface itself, for a repository that has stopped generating Twirp. |
+
+The environment variable overrides the variable for a single run, which is what
+a CI job or a one-off regeneration uses rather than editing the magefile.
+
+### Developing `protoc-gen-elephant-rpc`
+
+`ELEPHANT_RPC_PLUGIN` replaces the pinned plugin command, and works whether or
+not the pin is set — which it is not, until elephantine tags a release with the
+plugin in it. Point it at a module checkout to generate a repository with a
+plugin you are editing:
+
+``` shell
+ELEPHANT_RPC_PLUGIN=../elephantine mage rpc:generate
+```
+
+It also takes a `module@version`, for generating against a plugin version other
+than the pinned one.
+
 ## Twirp tasks
+
+Deprecated: use the `rpc` namespace above. These targets run protoc inside the
+`elephant-twirptools` image, which is being retired, and they cannot generate
+Connect code.
 
 ### `twirp:stub` "application" "Service" "MethodName"
 
