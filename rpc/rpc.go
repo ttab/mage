@@ -29,7 +29,10 @@
 //     interface and the adapters that put Connect on it
 //     (protoc-gen-elephant-rpc, skipped until it has a release).
 //   - service.twirp.go, when Twirp generation is on.
-//   - docs/<service>-openapi.json, when OpenAPI generation is on.
+//   - docs/<service>-openapi.json, when OpenAPI generation is on, which by
+//     default is when Twirp generation is. The specification documents the
+//     "/twirp/" paths and Twirp's errors, so it says nothing true about a
+//     Connect only repository.
 //
 // A .proto file that declares no service is compiled to messages and
 // nothing else; the service plugins emit no file for it.
@@ -84,9 +87,15 @@ var (
 	// still serves the /twirp/ paths. Override: RPC_TWIRP.
 	Twirp = false
 
-	// OpenAPI turns the OpenAPI 3 specifications in ./docs on. Override:
-	// RPC_OPENAPI.
-	OpenAPI = true
+	// OpenAPI turns the OpenAPI 3 specifications in ./docs on. It follows
+	// Twirp unless it is set, because protoc-gen-openapi3 documents the
+	// Twirp surface: the paths it writes are "/twirp/<pkg>.<Service>/
+	// <Method>" and the errors it declares are Twirp's, so a Connect only
+	// repository would commit a specification of an API it does not serve.
+	// Set it to OpenAPIOn to write the specifications anyway, or to
+	// OpenAPIOff to stop writing them while Twirp is still served.
+	// Override: RPC_OPENAPI.
+	OpenAPI = OpenAPIFollowsTwirp
 
 	// VendorDir is the proto root that VendorProto copies into, relative to
 	// the repository root. Its contents are compiled but never generated
@@ -108,6 +117,34 @@ var (
 	// generating Twirp.
 	ElephantRPCOptions []string
 )
+
+// OpenAPISetting says whether the OpenAPI 3 specifications are generated. The
+// zero value follows Twirp, which is the surface the specifications describe.
+type OpenAPISetting int
+
+const (
+	// OpenAPIFollowsTwirp writes the specifications when Twirp generation
+	// is on.
+	OpenAPIFollowsTwirp OpenAPISetting = iota
+	// OpenAPIOn always writes the specifications.
+	OpenAPIOn
+	// OpenAPIOff never writes the specifications.
+	OpenAPIOff
+)
+
+// enabled resolves the setting against the effective Twirp configuration.
+func (s OpenAPISetting) enabled(twirp bool) bool {
+	switch s {
+	case OpenAPIOn:
+		return true
+	case OpenAPIOff:
+		return false
+	case OpenAPIFollowsTwirp:
+		return twirp
+	}
+
+	return twirp
+}
 
 // Environment variables that override the configuration above for a single
 // run.
@@ -134,7 +171,7 @@ func loadConfig() (config, error) {
 		return config{}, err
 	}
 
-	openAPI, err := boolFromEnv(OpenAPIEnv, OpenAPI)
+	openAPI, err := boolFromEnv(OpenAPIEnv, OpenAPI.enabled(twirp))
 	if err != nil {
 		return config{}, err
 	}
@@ -195,9 +232,10 @@ func protoRoot() (string, error) {
 	return ".", nil
 }
 
-// Generate compiles the service declarations in the repository and generates
-// the OpenAPI 3 specifications for them. The version stamped into the
-// specifications is resolved from the last ancestor git tag.
+// Generate compiles the service declarations in the repository and, where
+// OpenAPI generation is on, generates the OpenAPI 3 specifications for them.
+// The version stamped into the specifications is resolved from the last
+// ancestor git tag.
 func Generate() error {
 	v, err := internal.OutputSilent("git", "describe", "--tags", "--abbrev=0")
 	if err != nil {
