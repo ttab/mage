@@ -43,6 +43,7 @@ func TestGenerate(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			dir := t.TempDir()
 
+			withoutElephantRPCPlugin(t)
 			copyTree(t, filepath.Join("testdata", "greeter"), dir)
 			c.setup(t)
 			t.Chdir(dir)
@@ -101,6 +102,7 @@ func TestGenerate(t *testing.T) {
 func TestVendoredImport(t *testing.T) {
 	dir := t.TempDir()
 
+	withoutElephantRPCPlugin(t)
 	copyTree(t, filepath.Join("testdata", "vendored"), dir)
 
 	// The module has to be a dependency before its files can be vendored
@@ -194,6 +196,96 @@ func TestElephantRPCPluginOverrideInvalid(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected the generation to fail")
 	}
+}
+
+// TestElephantRPCPlugin generates the fixture with the real
+// protoc-gen-elephant-rpc, which is the assertion that the plugin is wired
+// into the template correctly: it has to receive the Go import path mappings
+// and the interface option, and the code it emits has to compile against the
+// Connect code generated beside it.
+//
+// The plugin has no released version to pin, so the test runs only when
+// ELEPHANT_RPC_PLUGIN names a checkout or a "module@version". Point it at an
+// elephantine checkout to run it:
+//
+//	ELEPHANT_RPC_PLUGIN=../elephantine go test ./rpc
+func TestElephantRPCPlugin(t *testing.T) {
+	plugin := os.Getenv(rpc.ElephantRPCPluginEnv)
+	if plugin == "" {
+		t.Skipf(
+			"%s is unset, so there is no protoc-gen-elephant-rpc to run:"+
+				" set it to an elephantine checkout, or to a"+
+				" \"module@version\", to run this test",
+			rpc.ElephantRPCPluginEnv)
+	}
+
+	cases := []struct {
+		name string
+		// twirp says whether the repository still generates Twirp, which
+		// is what decides who declares the plain service interface.
+		twirp bool
+	}{
+		{
+			// Twirp generates the interface, so the plugin emits the
+			// adapters and leaves it alone.
+			name:  "twirp declares the interface",
+			twirp: true,
+		},
+		{
+			// Nothing else declares it, so the plugin does.
+			name:  "the plugin declares the interface",
+			twirp: false,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+
+			copyTree(t, filepath.Join("testdata", "greeter"), dir)
+
+			if c.twirp {
+				t.Setenv(rpc.TwirpEnv, "true")
+			}
+
+			t.Chdir(dir)
+
+			err := rpc.Release("v1.2.3")
+			if err != nil {
+				t.Fatalf("generate the fixture: %v", err)
+			}
+
+			var (
+				messages = filepath.Join("rpc", "greeter")
+				adapters = filepath.Join(messages, "greeterconnect")
+			)
+
+			mustExist(t, filepath.Join(adapters, "service.elephant.go"))
+
+			// A file that declares no service gets nothing from the
+			// plugin.
+			mustNotExist(t, filepath.Join(adapters, "types.elephant.go"))
+			mustNotExist(t, filepath.Join(messages, "types.rpc.go"))
+
+			iface := filepath.Join(messages, "service.rpc.go")
+
+			if c.twirp {
+				mustNotExist(t, iface)
+			} else {
+				mustExist(t, iface)
+			}
+
+			vetModule(t, dir)
+		})
+	}
+}
+
+// withoutElephantRPCPlugin keeps a test that is not about the plugin from
+// picking one up from the environment of whoever is running it.
+func withoutElephantRPCPlugin(t *testing.T) {
+	t.Helper()
+
+	t.Setenv(rpc.ElephantRPCPluginEnv, "")
 }
 
 // checkSpec asserts that the OpenAPI specification was generated, stamped

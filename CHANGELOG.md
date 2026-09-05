@@ -48,11 +48,16 @@ Changes:
   `rpc.ElephantRPCOptions` — each with an environment variable that overrides
   it for a single run, which is what a CI job or a one-off regeneration uses
   rather than editing the magefile.
-- `protoc-gen-elephant-rpc`, which emits the plain protobuf service interface
-  and the Connect adapters around it, is part of the plugin set but has no
+- `protoc-gen-elephant-rpc`, which emits the Connect adapters that put Connect
+  on the plain protobuf service interface, is part of the plugin set but has no
   release to pin yet, so it is skipped. `ELEPHANT_RPC_PLUGIN` runs it anyway,
   from a `module@version` or from a module checkout, which is how the plugin is
-  developed against a repository that generates with it.
+  developed against a repository that generates with it. Its `interface`
+  option, which makes it write the plain service interface itself to
+  `service.rpc.go`, follows `rpc.Twirp`: `protoc-gen-twirp` owns that interface
+  for as long as it is generated and the plugin takes it over when it is not,
+  so a Connect-only repository's adapters compile with no configuration of its
+  own. `rpc.ElephantRPCOptions` overrides that in either direction.
 - A `.proto` file that declares no service is compiled to messages and nothing
   else, and a `go_package` written as a relative path — which the `twirp:stub`
   template produced — no longer has to be edited: the Go import path of the

@@ -71,7 +71,8 @@ func generateCode(conf config, services []service) error {
 		tpl.Plugins = append(tpl.Plugins, bufPlugin{
 			Local: elephantRPC,
 			Out:   ".",
-			Opt:   append(append([]string{}, opts...), ElephantRPCOptions...),
+			Opt: append(append([]string{}, opts...),
+				elephantRPCOptions(conf)...),
 		})
 	}
 
