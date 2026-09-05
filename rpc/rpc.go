@@ -243,21 +243,30 @@ func protoRoot() (string, error) {
 // Generate compiles the service declarations in the repository and, where
 // OpenAPI generation is on, generates the OpenAPI 3 specifications for them.
 // The version stamped into the specifications is resolved from the last
-// ancestor git tag.
+// ancestor git tag, and only when a specification is written: a Connect only
+// repository writes none, so it generates before it has been tagged at all.
 func Generate() error {
+	return generateAll(versionFromGitTags)
+}
+
+// versionFromGitTags resolves the version to stamp into the OpenAPI
+// specifications from the last ancestor git tag.
+func versionFromGitTags() (string, error) {
 	v, err := internal.OutputSilent("git", "describe", "--tags", "--abbrev=0")
 	if err != nil {
-		return fmt.Errorf("resolve version from git tags: %w", err)
+		return "", fmt.Errorf("resolve version from git tags: %w", err)
 	}
 
-	return generateAll(strings.TrimSpace(v))
+	return strings.TrimSpace(v), nil
 }
 
 // Release runs the same generation as Generate, but stamps the provided
 // version into the OpenAPI specifications instead of resolving it from the
 // git tags.
 func Release(version string) error {
-	err := generateAll(version)
+	err := generateAll(func() (string, error) {
+		return version, nil
+	})
 	if err != nil {
 		return err
 	}
@@ -270,7 +279,13 @@ func Release(version string) error {
 	return nil
 }
 
-func generateAll(version string) error {
+// generateAll compiles every service the repository declares and, where
+// OpenAPI generation is on, writes their specifications.
+//
+// The version is resolved lazily because nothing but the specifications uses
+// it: a repository that writes none never asks for it, and so never needs a
+// git tag to generate from.
+func generateAll(version func() (string, error)) error {
 	conf, err := loadConfig()
 	if err != nil {
 		return err
@@ -295,13 +310,18 @@ func generateAll(version string) error {
 		return nil
 	}
 
+	v, err := version()
+	if err != nil {
+		return err
+	}
+
 	err = internal.EnsureDirectory(docsDir)
 	if err != nil {
 		return fmt.Errorf("ensure docs directory: %w", err)
 	}
 
 	for _, s := range services {
-		err := generateOpenAPI(s, version)
+		err := generateOpenAPI(s, v)
 		if err != nil {
 			return fmt.Errorf("generate the %q specification: %w", s.Name, err)
 		}
