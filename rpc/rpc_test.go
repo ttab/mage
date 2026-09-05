@@ -77,8 +77,17 @@ func TestGenerate(t *testing.T) {
 			// is vendored into the repository.
 			mustNotExist(t, "buf.yaml")
 
-			checkSpec(t, filepath.Join("docs", "greeter-openapi.json"),
-				"greeter", "v1.2.3")
+			// The specification documents the /twirp/ paths and
+			// Twirp's errors, so it follows Twirp: a Connect only
+			// repository would otherwise commit a document of an
+			// API it does not serve.
+			spec := filepath.Join("docs", "greeter-openapi.json")
+
+			if c.twirp {
+				checkSpec(t, spec, "greeter", "v1.2.3")
+			} else {
+				mustNotExist(t, spec)
+			}
 
 			vetModule(t, dir)
 		})
