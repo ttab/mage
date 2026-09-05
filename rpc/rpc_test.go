@@ -95,6 +95,27 @@ func TestGenerate(t *testing.T) {
 	}
 }
 
+// TestGenerateWithoutGitTags covers a repository that has never been tagged,
+// which is where a new Connect-only service starts. The version is only ever
+// stamped into an OpenAPI specification, and a Connect-only repository writes
+// none, so generating must not go looking for one.
+func TestGenerateWithoutGitTags(t *testing.T) {
+	dir := t.TempDir()
+
+	withoutElephantRPCPlugin(t)
+	copyTree(t, filepath.Join("testdata", "greeter"), dir)
+	t.Chdir(dir)
+
+	err := rpc.Generate()
+	if err != nil {
+		t.Fatalf("generate the fixture: %v", err)
+	}
+
+	mustExist(t, filepath.Join("rpc", "greeter", "greeterconnect",
+		"service.connect.go"))
+	mustNotExist(t, filepath.Join("docs", "greeter-openapi.json"))
+}
+
 // TestVendoredImport covers the newsdoc case: a service that imports a proto
 // file from another repository. The compiler only sees its own workspace, so
 // the file is vendored in and the vendor directory becomes a module root of
