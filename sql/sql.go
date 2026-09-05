@@ -20,8 +20,18 @@ import (
 )
 
 const (
-	sqlTools      = "ghcr.io/ttab/elephant-sqltools:v0.1.3"
-	postgresImage = "docker.io/pgvector/pgvector:pg17"
+	sqlTools = "ghcr.io/ttab/elephant-sqltools:v0.1.3"
+
+	postgresImage   = "docker.io/pgvector/pgvector:pg17"
+	postgresImage18 = "docker.io/pgvector/pgvector:pg18"
+)
+
+// Container names for the local Postgres instances. The 17 instances are named
+// after the project that created them, the 18 instance is shared between them
+// all, as the per-project data directory was never anything we made use of.
+const (
+	pg17Prefix   = "postgres-"
+	pg18Instance = "postgres18"
 )
 
 // SqlcCommand returns a command function that runs sqlc in docker with the
@@ -140,9 +150,12 @@ func DumpSchema() error {
 	// Buffer for keeping the dumped schema in memory for postprocessing.
 	var buf bytes.Buffer
 
+	// Always dump with the newest pg_dump we ship. It reads older servers
+	// fine, so a project still on 17 gets the same schema.sql it will get
+	// once it moves to 18.
 	ok, err := sh.Exec(nil, &buf, os.Stderr,
 		"docker", "run", "--rm", "--network", "host",
-		postgresImage,
+		postgresImage18,
 		"pg_dump", connString,
 		"--schema-only", "--no-owner", "--no-privileges",
 	)
@@ -160,6 +173,8 @@ func DumpSchema() error {
 	var (
 		restrict   = []byte("\\restrict")
 		unrestrict = []byte("\\unrestrict")
+		dumpedFrom = []byte("-- Dumped from database version")
+		dumpedBy   = []byte("-- Dumped by pg_dump version")
 		nl         = []byte("\n")
 	)
 
@@ -168,8 +183,12 @@ func DumpSchema() error {
 	for scan.Scan() {
 		line := scan.Bytes()
 
-		// Ignore the \restrict and \unrestrict directives.
-		if hasAnyPrefix(line, restrict, unrestrict) {
+		// Ignore the \restrict and \unrestrict directives, and the
+		// version header, which records the versions of the server and
+		// pg_dump that happened to produce the dump. The schema is the
+		// same either way, so keeping them just churns the file every
+		// time we move to a new Postgres.
+		if hasAnyPrefix(line, restrict, unrestrict, dumpedFrom, dumpedBy) {
 			continue
 		}
 
@@ -206,8 +225,17 @@ func hasAnyPrefix(line []byte, prefixes ...[]byte) bool {
 	return false
 }
 
-// Postgres creates a local Postgres instance using docker.
+// Postgres creates a local Postgres 17 instance using docker.
 func Postgres(name string) error {
+	return startPostgres(pg17Prefix+name, postgresImage)
+}
+
+// Postgres18 creates the local Postgres 18 instance using docker.
+func Postgres18() error {
+	return startPostgres(pg18Instance, postgresImage18)
+}
+
+func startPostgres(instanceName string, image string) error {
 	uid := os.Getuid()
 	gid := os.Getgid()
 
@@ -216,8 +244,6 @@ func Postgres(name string) error {
 		return fmt.Errorf("get state directory path: %w", err)
 	}
 
-	instanceName := "postgres-" + name
-
 	dataDir := filepath.Join(stateDir, instanceName)
 
 	err = os.MkdirAll(dataDir, 0o700)
@@ -225,9 +251,9 @@ func Postgres(name string) error {
 		return fmt.Errorf("create local state directory: %w", err)
 	}
 
-	err = internal.StopContainerIfExists(instanceName)
+	err = stopRunningInstances()
 	if err != nil {
-		return fmt.Errorf("stop existing container: %w", err)
+		return err
 	}
 
 	err = sh.Run("docker", "run", "-d", "--rm",
@@ -238,12 +264,35 @@ func Postgres(name string) error {
 		"-e", "PGDATA=/var/lib/postgresql/data/pgdata",
 		"-v", fmt.Sprintf("%s:/var/lib/postgresql/data", dataDir),
 		"-p", "5432:5432",
-		postgresImage,
+		image,
 		"-c", "wal_level=logical",
 		"-c", "log_lock_waits=on",
 	)
 	if err != nil {
 		return fmt.Errorf("start postgres: %w", err)
+	}
+
+	return nil
+}
+
+// stopRunningInstances stops all the Postgres instances we manage. They all
+// publish port 5432, and no major version can read another's data directory,
+// so only one of them runs at a time.
+func stopRunningInstances() error {
+	names, err := internal.RunningContainerNames()
+	if err != nil {
+		return fmt.Errorf("list running containers: %w", err)
+	}
+
+	for _, name := range names {
+		if name != pg18Instance && !strings.HasPrefix(name, pg17Prefix) {
+			continue
+		}
+
+		err := internal.StopContainerIfExists(name)
+		if err != nil {
+			return fmt.Errorf("stop the %q container: %w", name, err)
+		}
 	}
 
 	return nil

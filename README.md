@@ -53,7 +53,15 @@ SqlcConfig adds the default sqlc.yaml configuration file.
 
 ### `sql:postgres` "name"
 
-Postgres creates a local Postgres instance using docker. Data will be stored under the platform data directory (e.g. `~/.local/share/tt-mage/postgres-[name]` on Linux, `~/Library/tt-mage/postgres-[name]` on macOS). Override with the `STATE_DIR` environment variable.
+Postgres creates a local Postgres 17 instance using docker. Data will be stored under the platform data directory (e.g. `~/.local/share/tt-mage/postgres-[name]` on Linux, `~/Library/tt-mage/postgres-[name]` on macOS). Override with the `STATE_DIR` environment variable.
+
+### `sql:postgres18`
+
+Postgres18 creates the local Postgres 18 instance, storing its data in `tt-mage/postgres18` under the same data directory. It takes no name: one instance is shared by all projects, since the per-project data directories of `sql:postgres` were never anything we made use of.
+
+Both versions publish port 5432, and no major version can read another's data directory, so only one instance runs at a time — starting either stops whichever of them is running. Nothing else changes when you switch: the connection string, `sql:db`, `sql:migrate` and `sql:dumpSchema` are the same against both.
+
+The databases in an instance are its own, so a project that moves to 18 recreates them there with `sql:db` and `sql:migrate`.
 
 ### `sql:db`
 
@@ -139,6 +147,10 @@ psql $(mage sql:connString)
 ### `sql:dumpSchema`
 
 DumpSchema writes the current database schema to "./postgres/schema.sql".
+
+The dump is always taken with Postgres 18's `pg_dump`, which reads a 17 server perfectly well, and the `-- Dumped from database version` / `-- Dumped by pg_dump version` header is stripped along with the `\restrict` directives. Between them, a project's schema.sql stops depending on which Postgres produced it: the same DDL dumped from a 17 server and from an 18 server gives a byte-identical file, so moving a project over is not a schema diff.
+
+The first dump after upgrading mage drops those two header lines, so expect one churn commit per project.
 
 ### `sql.GrantReporting`
 
