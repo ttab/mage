@@ -36,9 +36,10 @@ const (
 
 	// ElephantRPCVersion pins protoc-gen-elephant-rpc, the plugin that
 	// emits the plain protobuf service interface and the Connect adapters
-	// around it. An empty version means the plugin is skipped, which is
-	// where it stands until elephantine has tagged a release containing
-	// it. Set ELEPHANT_RPC_PLUGIN to run it before then.
+	// around it. It is set to the elephantine release that ships the
+	// plugin; an empty version means the plugin is skipped, which is where
+	// it stands until that release is tagged. Set ELEPHANT_RPC_PLUGIN to
+	// run it before then.
 	ElephantRPCVersion = ""
 )
 
@@ -55,6 +56,43 @@ const (
 // ElephantRPCPluginEnv names the environment variable that replaces the
 // pinned protoc-gen-elephant-rpc command.
 const ElephantRPCPluginEnv = "ELEPHANT_RPC_PLUGIN"
+
+// interfaceOption is the protoc-gen-elephant-rpc option that makes it emit
+// the plain service interface itself.
+const interfaceOption = "interface"
+
+// elephantRPCOptions returns the options protoc-gen-elephant-rpc is run with:
+// whatever the magefile set, plus "interface=true" when nothing else emits
+// the plain service interface.
+//
+// The adapters take and return that interface, so something has to declare
+// it: protoc-gen-twirp does while a repository still generates Twirp, and
+// protoc-gen-elephant-rpc does when it does not. Following Twirp here is what
+// makes a Connect-only repository's generated code compile with no
+// configuration of its own. A magefile that sets the option itself keeps its
+// value, which is how a repository generates the interface before it stops
+// generating Twirp, or leaves it to a hand-written declaration.
+func elephantRPCOptions(conf config) []string {
+	options := append([]string{}, ElephantRPCOptions...)
+
+	if conf.Twirp || hasOption(options, interfaceOption) {
+		return options
+	}
+
+	return append(options, interfaceOption+"=true")
+}
+
+// hasOption reports whether a plugin option is set, as "name" or "name=value".
+func hasOption(options []string, name string) bool {
+	for _, o := range options {
+		key, _, _ := strings.Cut(o, "=")
+		if key == name {
+			return true
+		}
+	}
+
+	return false
+}
 
 // goRun returns the command that runs a pinned tool without installing it.
 func goRun(module string, version string) []string {

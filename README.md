@@ -47,13 +47,24 @@ Per service, into the service's own directory:
 | `service.pb.go` | `protoc-gen-go` |
 | `<package>connect/service.connect.go` | `protoc-gen-connect-go` |
 | `<package>connect/service.elephant.go` | `protoc-gen-elephant-rpc` |
+| `service.rpc.go` | `protoc-gen-elephant-rpc`, when Twirp is off |
 | `service.twirp.go` | `protoc-gen-twirp`, when Twirp is on |
 | `docs/<service>-openapi.json` | `protoc-gen-openapi3`, when OpenAPI is on |
 
-`protoc-gen-elephant-rpc` emits the plain protobuf service interface and the
-Connect adapters that put Connect on it. It is skipped until elephantine has
-tagged a release containing it, so a repository generating today gets the first
-two plugins and, where it is turned on, Twirp.
+`protoc-gen-elephant-rpc` emits the Connect adapters that put Connect on the
+plain protobuf service interface: `New<Service>ServiceHandler`, which serves an
+implementation with the `(ctx, *Request) (*Response, error)` signatures Twirp
+has always generated, and `New<Service>ServiceClient`, which is a drop-in for
+`New<Service>ProtobufClient`. The adapters take and return that interface, so
+something has to declare it — `protoc-gen-twirp` does while a repository still
+generates Twirp, and the plugin's own `interface` option does when it does not.
+The option follows `rpc.Twirp`, which is what makes a Connect-only repository's
+generated code compile with no configuration of its own;
+`rpc.ElephantRPCOptions` overrides it.
+
+The plugin is skipped until elephantine has tagged a release containing it, so
+a repository generating today gets the messages and the Connect code and, where
+it is turned on, Twirp.
 
 ### `rpc:generate`
 
@@ -118,7 +129,7 @@ func init() {
 | `rpc.OpenAPI` | `RPC_OPENAPI` | follows Twirp | Write the OpenAPI 3 specifications to `./docs`. `protoc-gen-openapi3` documents the Twirp surface — `/twirp/` paths, Twirp's error schema — so the default follows `rpc.Twirp` and a Connect-only repository writes no specification rather than one of an API it does not serve. `rpc.OpenAPIOn` writes them anyway, `rpc.OpenAPIOff` stops writing them while Twirp is still served. |
 | `rpc.VendorDir` | `RPC_VENDOR_DIR` | `rpc/vendor` | The proto root `rpc:vendorProto` copies into. |
 | `rpc.ExtraProtoRoots` | `RPC_EXTRA_PROTO_ROOTS` | none | Further directories to add to the buf workspace, for a repository that keeps protobuf sources outside the proto root. Their files are resolvable as imports and are not generated for. |
-| `rpc.ElephantRPCOptions` | — | none | Extra options for `protoc-gen-elephant-rpc`. The one to know about is `interface=true`, which makes it emit the plain service interface itself, for a repository that has stopped generating Twirp. |
+| `rpc.ElephantRPCOptions` | — | `interface` follows Twirp | Extra options for `protoc-gen-elephant-rpc`. The one to know about is `interface`, which decides whether the plugin emits the plain service interface itself, and which is set here only to override the default of leaving it to `protoc-gen-twirp` for as long as Twirp is generated. |
 
 The environment variable overrides the variable for a single run, which is what
 a CI job or a one-off regeneration uses rather than editing the magefile.
@@ -136,6 +147,15 @@ ELEPHANT_RPC_PLUGIN=../elephantine mage rpc:generate
 
 It also takes a `module@version`, for generating against a plugin version other
 than the pinned one.
+
+The same variable runs this module's own end-to-end test of the plugin, which
+generates the fixture repository with it and checks that the emitted code
+compiles. It is skipped when the variable is unset, since there is no released
+version to fall back on:
+
+``` shell
+ELEPHANT_RPC_PLUGIN=../elephantine go test ./rpc
+```
 
 ## Twirp tasks
 

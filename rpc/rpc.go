@@ -25,9 +25,11 @@
 //   - service.pb.go, the messages (protoc-gen-go).
 //   - <package>connect/service.connect.go, the Connect client and handler
 //     (protoc-gen-connect-go).
-//   - <package>connect/service.elephant.go, the plain protobuf service
-//     interface and the adapters that put Connect on it
-//     (protoc-gen-elephant-rpc, skipped until it has a release).
+//   - <package>connect/service.elephant.go, the adapters that put Connect on
+//     the plain protobuf service interface (protoc-gen-elephant-rpc, skipped
+//     until it has a release).
+//   - service.rpc.go, the plain service interface itself, when the same
+//     plugin runs and Twirp is not generating that interface.
 //   - service.twirp.go, when Twirp generation is on.
 //   - docs/<service>-openapi.json, when OpenAPI generation is on, which by
 //     default is when Twirp generation is. The specification documents the
@@ -111,10 +113,16 @@ var (
 	ExtraProtoRoots []string
 
 	// ElephantRPCOptions are extra options for protoc-gen-elephant-rpc, on
-	// top of paths=source_relative and the Go import path mappings. The one
-	// to know about is "interface=true", which makes the plugin emit the
-	// plain service interface itself, for a repository that has stopped
-	// generating Twirp.
+	// top of paths=source_relative, the Go import path mappings and the
+	// interface option.
+	//
+	// The interface option follows Twirp, and setting it here is what
+	// overrides that. The plugin's adapters take and return the plain
+	// service interface, so something has to declare it: it is generated
+	// with "interface=true" when Twirp is off, and left to protoc-gen-twirp
+	// when Twirp is on. A repository that wants the generated interface
+	// while it still serves the /twirp/ paths sets "interface=true" here,
+	// and one that declares the interface itself sets "interface=false".
 	ElephantRPCOptions []string
 )
 
