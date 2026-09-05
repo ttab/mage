@@ -1,3 +1,12 @@
+// Package twirp compiles protobuf service declarations by running protoc in
+// the elephant-twirptools image.
+//
+// Deprecated: use github.com/ttab/mage/rpc, which generates the same files
+// with buf instead of protoc in a container, pins every plugin as a "go run"
+// version rather than an image tag, and adds the Connect output the fleet is
+// migrating to. The rpc namespace has the same targets, and keeps Twirp
+// generation available behind rpc.Twirp for as long as a repository serves
+// the /twirp/ paths.
 package twirp
 
 import (

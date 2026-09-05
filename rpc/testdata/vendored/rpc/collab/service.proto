@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package ttab.collab;
+
+option go_package = "github.com/ttab/rpcvendorfixture/rpc/collab";
+
+import "newsdoc/newsdoc.proto";
+
+service Documents {
+  rpc Get(GetRequest) returns (GetResponse);
+}
+
+// GetRequest asks for a document.
+message GetRequest {
+  // Uuid of the document.
+  string uuid = 1;
+}
+
+// GetResponse carries the document.
+message GetResponse {
+  // Document that was asked for.
+  newsdoc.Document document = 1;
+}
