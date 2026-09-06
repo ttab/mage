@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"text/template"
 
 	"github.com/ttab/mage/internal"
@@ -19,7 +20,16 @@ var (
 	messageConstraint = "must start with an uppercase letter and only contain the characters a-z, A-Z, 0-9"
 )
 
-// Stub generates a protobuf service stub, in the repository's proto root.
+// StubVersion is the version element a stubbed service is scaffolded into.
+// Every new declaration starts at v1; a second major version is a directory
+// somebody copies it into when the two have to be served side by side.
+const StubVersion = "v1"
+
+// Stub generates a protobuf service stub in the repository's proto root,
+// under "<application>/v1". That is buf's layout, and it is the one that
+// leaves room for a second version of a declaration. The flat layout the
+// fleet grew up with is still discovered and generated for; nothing new is
+// written into it.
 func Stub(application, service, method string) error {
 	if !applicationExp.MatchString(application) {
 		return errors.New(
@@ -44,7 +54,7 @@ func Stub(application, service, method string) error {
 		return err
 	}
 
-	dir := filepath.Join(root, application)
+	dir := filepath.Join(root, application, StubVersion)
 
 	err = internal.EnsureDirectory(dir)
 	if err != nil {
@@ -60,9 +70,12 @@ func Stub(application, service, method string) error {
 
 	err = tpl.Execute(&buf, stubData{
 		Application: application,
+		Version:     StubVersion,
 		Service:     service,
 		Method:      method,
 		GoPackage:   filepath.ToSlash(filepath.Join(module, dir)),
+		GoPackageName: fmt.Sprintf("%s%s",
+			strings.ReplaceAll(application, "_", ""), StubVersion),
 	})
 	if err != nil {
 		return fmt.Errorf("templating error: %w", err)
@@ -93,9 +106,9 @@ func stubRoot() (string, error) {
 		return root, nil
 	}
 
-	existing, err := filepath.Glob(filepath.Join("*", "service.proto"))
+	existing, err := discoverServices(conf)
 	if err != nil {
-		return "", fmt.Errorf("glob for proto services: %w", err)
+		return "", err
 	}
 
 	if len(existing) > 0 {
@@ -107,9 +120,9 @@ func stubRoot() (string, error) {
 
 const stubTpl = `syntax = "proto3";
 
-package ttab.{{.Application}};
+package ttab.{{.Application}}.{{.Version}};
 
-option go_package = "{{.GoPackage}}";
+option go_package = "{{.GoPackage}};{{.GoPackageName}}";
 
 service {{.Service}} {
   rpc {{.Method}}({{.Method}}Request) returns ({{.Method}}Response);
@@ -124,7 +137,14 @@ message {{.Method}}Response {}
 
 type stubData struct {
 	Application string
+	Version     string
 	Service     string
 	Method      string
-	GoPackage   string
+	// GoPackage is the import path of the generated code.
+	GoPackage string
+	// GoPackageName names the Go package separately from the import path,
+	// which the versioned layout needs: the last element of the path is
+	// the version, and every service in the repository would otherwise
+	// generate a package called v1.
+	GoPackageName string
 }

@@ -7,20 +7,33 @@ pull requests hold the detail.
 ## [v0.13.0] - Unreleased
 
 **Breaking (Go 1.27):** the module's `go` directive is 1.27.1, so a repository
-that imports these targets needs a Go 1.27 toolchain to build its magefile.
+that imports these targets needs a Go 1.27 toolchain to build its magefile. The
+`rpc` targets go one step further and pin the toolchain they compile the
+protobuf generators with, `rpc.GeneratorToolchain`, downloading it when the
+machine has another one: the toolchain decides some of the bytes a generator
+writes, and `protoc-gen-twirp` embeds a gzipped file descriptor whose encoding
+changed between Go 1.26 and Go 1.27, so the same declaration produced two
+different `service.twirp.go` files depending on who ran the generator.
 
 **New namespace (rpc):** `rpc:generate` is the protobuf generation path from
 here on, and it generates Connect code alongside the messages. It compiles with
 buf rather than protoc in the `elephant-twirptools` image, and runs buf and
-every plugin as `go run <module>@<version>` with the versions pinned in the
-`rpc` package, so generating needs no Docker, installs nothing and takes
-nothing off `PATH`. No `buf.gen.yaml` is committed anywhere; the generation
+every plugin out of a module pinned in the `rpc` package — `go run
+<module>@<version>` for all of them but `protoc-gen-twirp` — so generating
+needs no Docker, installs nothing and takes nothing off `PATH`. No `buf.gen.yaml` is committed anywhere; the generation
 template is passed to buf inline. Adopting it in a repository is this bump, a
 `//mage:import rpc` in the magefile and, for a repository that still serves the
 `/twirp/` paths, `rpc.Twirp = true` in an `init` — Twirp generation is off by
 default, because a new service is Connect only. Generation reads nothing but
 the sources, so a repository that has not been tagged yet — which is where a
-new service starts — can run `rpc:generate`.
+new service starts — can run `rpc:generate`. Services are discovered in either
+layout, `<proto root>/*/service.proto` and `<proto root>/*/v*/service.proto`,
+and `rpc:stub` scaffolds the versioned one, so a repository can move to it a
+service at a time. Two configurations are refused rather than generated:
+`rpc.Twirp` together with the plugin's `interface=true` option, since both
+write the plain service interface and the package would declare it twice, and
+a `go_package` that names an import path other than the one the generated code
+lands under.
 
 **Removed (OpenAPI):** the `rpc` namespace does not generate the OpenAPI 3
 specifications the `twirp` namespace wrote to `docs/<service>-openapi.json`.
@@ -46,7 +59,22 @@ workspace cannot reach outside its root. The vendored file keeps the path it
 has in the repository it came from, so the `import` in the service's own
 `.proto` does not change, and the vendor directory becomes a module root of its
 own in a generated `buf.yaml`. `newsdoc/newsdoc.proto` is the only file the
-fleet vendors.
+fleet vendors. A `buf.yaml` this namespace did not write is still left alone —
+buf's lint and breaking change rules live in that file — but it has to declare
+the vendored root and exclude it from the module rooted in the repository, and
+both targets now fail naming what is missing instead of reporting success and
+leaving a workspace buf cannot resolve the import in.
+
+**Behaviour change (generating needs the network):** buf and every plugin run
+as a module of their own, which means a version query on every run, so
+`GOPROXY=off` fails even with a warm module cache and generating offline does
+not work. The `elephant-twirptools` image at least ran from a local pull;
+"installs nothing" bought that at the price of the network, which is worth
+knowing before a CI job is written to expect otherwise. `GOFLAGS` and
+`GOTOOLCHAIN` are normalised for the generator invocations rather than
+inherited: any `-mod` flag is dropped, since a repository that vendors its
+dependencies would otherwise send the generators looking for themselves in its
+`vendor` directory, and `GOTOOLCHAIN` is set to the pin.
 
 Changes:
 
@@ -66,14 +94,30 @@ Changes:
   `service.rpc.go`, follows `rpc.Twirp`: `protoc-gen-twirp` owns that interface
   for as long as it is generated and the plugin takes it over when it is not,
   so a Connect-only repository's adapters compile with no configuration of its
-  own. `rpc.ElephantRPCOptions` overrides that in either direction.
+  own. `rpc.ElephantRPCOptions` overrides that in either direction, except that
+  asking for `interface=true` while Twirp is generated is refused. The plugin
+  cannot be turned off: an empty pin is an error rather than a run that quietly
+  leaves the adapters as they were.
+- Whichever of `service.rpc.go` and `service.twirp.go` is not generated this
+  time is deleted when an earlier configuration left it behind. They are the
+  same declaration, so turning Twirp off used to leave a package with two of
+  them, which elephant-public-api fixed by hand. Only a file carrying the
+  generator's `// Code generated by` header is removed.
+- `protoc-gen-twirp` is run out of a small module this package carries, written
+  into a working directory for the length of a run, rather than as
+  `go run <module>@<version>`. It is a `+incompatible` module with no `go.mod`
+  of its own, so that resolved its dependencies afresh on every run.
 - A `.proto` file that declares no service is compiled to messages and nothing
   else, and a `go_package` written as a relative path — which the `twirp:stub`
   template produced — no longer has to be edited: the Go import path of the
   generated package is derived from the module path and passed to the plugins.
   Connect generates into a subpackage and has to import the message package,
-  which a relative path cannot be turned into. `rpc:stub` writes the full
-  import path.
+  which a relative path cannot be turned into. A declaration that does name an
+  import path has to name that one, and generation says so rather than letting
+  the mistake surface as uncompilable code. `rpc:stub` writes the full import
+  path, and writes it into `[proto root]/[application]/v1/`, with the protobuf
+  package `ttab.[application].v1` and a `go_package` that names the Go package
+  separately from the path, since the last element of that path is the version.
 - A repository that keeps its protos in the repository root can vendor an
   import: the `rpc/vendor` directory `rpc:vendorProto` creates no longer makes
   the targets believe the sources have moved to `rpc/`. The proto root is `rpc`

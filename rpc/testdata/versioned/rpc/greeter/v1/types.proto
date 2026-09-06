@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package ttab.greeter.v1;
+
+option go_package = "github.com/ttab/rpcversionedfixture/rpc/greeter/v1;greeterv1";
+
+// Greeting is a message type declared without a service, to keep the service
+// plugins honest: they must compile it and emit nothing for it.
+message Greeting {
+  // Text of the greeting.
+  string text = 1;
+}

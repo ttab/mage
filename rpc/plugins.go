@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/ttab/mage/internal"
@@ -16,6 +17,20 @@ import (
 // ttab/mage bump, which is what makes the regenerated output show up as a
 // diff in the bump's pull request.
 const (
+	// GeneratorToolchain pins the Go toolchain the generators are compiled
+	// and run with, and is set in the environment of every generator
+	// invocation. The toolchain is part of what a generator writes:
+	// protoc-gen-twirp embeds a gzipped file descriptor, compress/flate
+	// changed its output between Go 1.26 and Go 1.27, and the same
+	// declaration therefore gave a different service.twirp.go on two
+	// machines. A "toolchain" directive in a go.mod would not have been
+	// enough, since that is a floor and the go command prefers a newer local
+	// toolchain over it.
+	//
+	// It is an exact version, so generating downloads that toolchain on a
+	// machine that has another one. Keep it on the fleet's Go floor.
+	GeneratorToolchain = "go1.27.1"
+
 	// BufVersion pins the protobuf compiler.
 	BufVersion = "v1.72.0"
 
@@ -28,15 +43,20 @@ const (
 	ConnectGoVersion = "v1.20.0"
 
 	// TwirpVersion pins the Twirp generator, used while a repository still
-	// serves the /twirp/ paths.
+	// serves the /twirp/ paths. It is not run with "go run
+	// <module>@<version>": protoc-gen-twirp has no go.mod, so that would
+	// resolve its dependencies afresh on every run. It is run out of the
+	// module in twirpgen instead, which requires this version and carries a
+	// complete go.sum.
 	TwirpVersion = "v8.1.3"
 
 	// ElephantRPCVersion pins protoc-gen-elephant-rpc, the plugin that
 	// emits the plain protobuf service interface and the Connect adapters
 	// around it. It is a pseudo-version of elephantine's feature/connect-rpc
 	// branch until that work is tagged, at which point it becomes the tag.
-	// An empty version would skip the plugin; ELEPHANT_RPC_PLUGIN overrides
-	// it for developing the plugin against a repository.
+	// An empty version is an error rather than a skipped plugin;
+	// ELEPHANT_RPC_PLUGIN overrides it for developing the plugin against a
+	// repository.
 	ElephantRPCVersion = "v0.28.1-0.20260906072220-372646f2638f"
 )
 
@@ -44,7 +64,6 @@ const (
 	bufModule          = "github.com/bufbuild/buf/cmd/buf"
 	protocGenGoModule  = "google.golang.org/protobuf/cmd/protoc-gen-go"
 	connectGoModule    = "connectrpc.com/connect/cmd/protoc-gen-connect-go"
-	twirpModule        = "github.com/twitchtv/twirp/protoc-gen-twirp"
 	elephantRPCModule  = "github.com/ttab/elephantine/cmd/protoc-gen-elephant-rpc"
 	elephantRPCCommand = "./cmd/protoc-gen-elephant-rpc"
 )
@@ -80,14 +99,80 @@ func elephantRPCOptions(conf config) []string {
 
 // hasOption reports whether a plugin option is set, as "name" or "name=value".
 func hasOption(options []string, name string) bool {
-	for _, o := range options {
-		key, _, _ := strings.Cut(o, "=")
-		if key == name {
-			return true
-		}
+	_, ok := optionValue(options, name)
+
+	return ok
+}
+
+// interfaceEnabled reports whether protoc-gen-elephant-rpc writes the plain
+// service interface on this run. A value that is not a boolean is left for
+// the plugin to complain about.
+func interfaceEnabled(conf config) bool {
+	value, ok := optionValue(elephantRPCOptions(conf), interfaceOption)
+	if !ok {
+		return false
 	}
 
-	return false
+	on, err := strconv.ParseBool(value)
+
+	return err == nil && on
+}
+
+// optionValue returns the value of a plugin option and whether it was set at
+// all. A bare "name" is the same as "name=true", which is how protoc plugin
+// options are written.
+func optionValue(options []string, name string) (string, bool) {
+	for _, o := range options {
+		key, value, hasValue := strings.Cut(o, "=")
+		if key != name {
+			continue
+		}
+
+		if !hasValue {
+			return "true", true
+		}
+
+		return value, true
+	}
+
+	return "", false
+}
+
+// generatorEnv returns the environment overrides every generator invocation
+// runs with. buf passes its own environment on to the plugins it spawns, so
+// setting it on buf is what reaches all of them.
+//
+// GOTOOLCHAIN pins the compiler, because the toolchain decides some of the
+// bytes a generator writes. GOFLAGS has -mod dropped: a repository that
+// vendors its dependencies has -mod=vendor in the environment or in "go env",
+// and the generators are separate modules run out of the module cache rather
+// than out of that vendor directory, so every one of them fails with "cannot
+// query module" until the flag is out of the way.
+func generatorEnv() (map[string]string, error) {
+	flags, err := internal.OutputSilent("go", "env", "GOFLAGS")
+	if err != nil {
+		return nil, fmt.Errorf("read the Go build flags: %w", err)
+	}
+
+	return map[string]string{
+		"GOTOOLCHAIN": GeneratorToolchain,
+		"GOFLAGS":     withoutModFlag(flags),
+	}, nil
+}
+
+// withoutModFlag returns a GOFLAGS value with any -mod flag removed.
+func withoutModFlag(flags string) string {
+	var kept []string
+
+	for f := range strings.FieldsSeq(flags) {
+		if strings.HasPrefix(f, "-mod=") {
+			continue
+		}
+
+		kept = append(kept, f)
+	}
+
+	return strings.Join(kept, " ")
 }
 
 // goRun returns the command that runs a pinned tool without installing it.
@@ -100,8 +185,13 @@ func goRunArgs(args ...string) []string {
 	return append([]string{"go", "run"}, args...)
 }
 
-// elephantRPCPlugin resolves the command that runs protoc-gen-elephant-rpc,
-// returning nil when the plugin is to be skipped.
+// elephantRPCPlugin resolves the command that runs protoc-gen-elephant-rpc.
+//
+// There is no way to skip the plugin. The adapters it writes are what puts
+// Connect on the plain service interface, so a run without it leaves whatever
+// was generated last time in place and reports success, which is how a
+// repository ends up shipping adapters for a declaration it no longer has.
+// A missing pin is an error.
 //
 // ELEPHANT_RPC_PLUGIN overrides the pin, and works whether or not
 // ElephantRPCVersion is set. It is either "<module>@<version>", or the
@@ -109,11 +199,30 @@ func goRunArgs(args ...string) []string {
 // against a repository that generates with it:
 //
 //	ELEPHANT_RPC_PLUGIN=../elephantine mage rpc:generate
+//
+// Setting it to an empty value is an error rather than the same thing as
+// leaving it unset, so that nothing can quietly unset the plugin.
 func elephantRPCPlugin() ([]string, error) {
-	override := strings.TrimSpace(os.Getenv(ElephantRPCPluginEnv))
+	value, set := os.LookupEnv(ElephantRPCPluginEnv)
+
+	override := strings.TrimSpace(value)
+
+	if set && override == "" {
+		return nil, fmt.Errorf(
+			"%s is set to an empty value, which names no"+
+				" protoc-gen-elephant-rpc to run: unset it to use the"+
+				" pinned %s, or point it at a module checkout",
+			ElephantRPCPluginEnv, ElephantRPCVersion)
+	}
+
 	if override == "" {
 		if ElephantRPCVersion == "" {
-			return nil, nil
+			return nil, fmt.Errorf(
+				"protoc-gen-elephant-rpc is not pinned, so the"+
+					" Connect adapters cannot be generated: set"+
+					" ElephantRPCVersion in github.com/ttab/mage/rpc,"+
+					" or name a plugin with %s",
+				ElephantRPCPluginEnv)
 		}
 
 		return goRun(elephantRPCModule, ElephantRPCVersion), nil

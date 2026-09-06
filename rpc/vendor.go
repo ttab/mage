@@ -65,29 +65,37 @@ func VendorProto(module string, file string) error {
 		return fmt.Errorf("read the vendored %q: %w", target, err)
 	}
 
-	if string(current) == string(source) {
-		_, _ = fmt.Fprintf(os.Stdout, "%s is up to date\n", target)
+	upToDate := string(current) == string(source)
 
-		return nil
-	}
+	if !upToDate {
+		err = internal.EnsureDirectory(filepath.Dir(target))
+		if err != nil {
+			return fmt.Errorf(
+				"ensure the vendored proto directory: %w", err)
+		}
 
-	err = internal.EnsureDirectory(filepath.Dir(target))
-	if err != nil {
-		return fmt.Errorf("ensure the vendored proto directory: %w", err)
-	}
-
-	// The target is built from the file name checked above, which is
-	// relative and does not jump context.
-	err = os.WriteFile(target, source, 0o600) //nolint:gosec
-	if err != nil {
-		return fmt.Errorf("write %q: %w", target, err)
+		// The target is built from the file name checked above, which
+		// is relative and does not jump context.
+		err = os.WriteFile(target, source, 0o600) //nolint:gosec
+		if err != nil {
+			return fmt.Errorf("write %q: %w", target, err)
+		}
 	}
 
 	// The vendor directory is a module root of its own in the buf
-	// workspace, and buf needs a configuration file to be told so.
+	// workspace, and buf needs a configuration file to be told so. This is
+	// checked even when the copy was already current, since a workspace
+	// that cannot resolve the import is the failure this target exists to
+	// prevent, and it is not fixed by copying the file again.
 	err = ensureBufConfig(conf)
 	if err != nil {
 		return err
+	}
+
+	if upToDate {
+		_, _ = fmt.Fprintf(os.Stdout, "%s is up to date\n", target)
+
+		return nil
 	}
 
 	_, _ = fmt.Fprintf(os.Stdout, "vendored %s from %s\n     to %s\n",

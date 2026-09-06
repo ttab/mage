@@ -17,23 +17,39 @@
 //
 // # What is generated
 //
-// The targets auto-discover services as "<proto root>/*/service.proto",
-// where the proto root is "rpc" when that directory exists and the
-// repository root otherwise, and generate for every .proto file in a
-// service's directory. Per service, into the service's own directory:
+// The targets auto-discover services in either layout,
+// "<proto root>/<application>/service.proto" and
+// "<proto root>/<application>/<version>/service.proto", where the proto root
+// is "rpc" when that directory exists and the repository root otherwise, and
+// generate for every .proto file in a service's directory. The versioned
+// layout is buf's convention and what rpc:stub scaffolds; a repository can
+// hold both. Per service, into the service's own directory:
 //
 //   - service.pb.go, the messages (protoc-gen-go).
 //   - <package>connect/service.connect.go, the Connect client and handler
 //     (protoc-gen-connect-go).
 //   - <package>connect/service.elephant.go, the adapters that put Connect on
-//     the plain protobuf service interface (protoc-gen-elephant-rpc, skipped
-//     until it has a release).
+//     the plain protobuf service interface (protoc-gen-elephant-rpc).
 //   - service.rpc.go, the plain service interface itself, when the same
 //     plugin runs and Twirp is not generating that interface.
 //   - service.twirp.go, when Twirp generation is on.
 //
 // A .proto file that declares no service is compiled to messages and
 // nothing else; the service plugins emit no file for it.
+//
+// Whichever of service.rpc.go and service.twirp.go is not generated is
+// removed if it is there from an earlier configuration, since two
+// declarations of the same interface in one package do not compile. Only a
+// file carrying the generator's header is removed.
+//
+// # What generation needs
+//
+// The network, or a warm module cache. buf and the plugins run as separate
+// modules, and every version query goes through the module proxy, so
+// GOPROXY=off fails even with everything already downloaded. A -mod flag in
+// GOFLAGS is dropped for the generator invocations — the generators are not
+// in a repository's vendor directory — and GOTOOLCHAIN is set to
+// GeneratorToolchain, which is downloaded when the machine has another one.
 //
 // # Configuration
 //
@@ -73,6 +89,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -157,7 +175,45 @@ func loadConfig() (config, error) {
 
 	conf.ProtoRoot = root
 
+	err = checkInterfaceOwner(conf)
+	if err != nil {
+		return config{}, err
+	}
+
 	return conf, nil
+}
+
+// checkInterfaceOwner refuses the one configuration that cannot compile:
+// protoc-gen-twirp and protoc-gen-elephant-rpc both writing the plain service
+// interface.
+func checkInterfaceOwner(conf config) error {
+	if !conf.Twirp {
+		return nil
+	}
+
+	value, ok := optionValue(ElephantRPCOptions, interfaceOption)
+	if !ok {
+		return nil
+	}
+
+	on, err := strconv.ParseBool(value)
+	if err != nil {
+		return fmt.Errorf(
+			"parse the protoc-gen-elephant-rpc %q option %q as a boolean: %w",
+			interfaceOption, value, err)
+	}
+
+	if !on {
+		return nil
+	}
+
+	return fmt.Errorf(
+		"twirp generation is on (rpc.Twirp or %s) and rpc.ElephantRPCOptions"+
+			" asks protoc-gen-elephant-rpc for %s=true, but both write the"+
+			" plain service interface — protoc-gen-twirp into service.twirp.go"+
+			" and the plugin into service.rpc.go — so the generated package"+
+			" would declare it twice and would not compile: turn one of them off",
+		TwirpEnv, interfaceOption)
 }
 
 func boolFromEnv(name string, fallback bool) (bool, error) {
@@ -233,7 +289,8 @@ func Generate() error {
 
 	if len(services) == 0 {
 		return fmt.Errorf(
-			"no %s/*/service.proto files to generate from", conf.ProtoRoot)
+			"no %[1]s/*/service.proto or %[1]s/*/v*/service.proto files to generate from",
+			conf.ProtoRoot)
 	}
 
 	return generateCode(conf, services)
@@ -242,36 +299,75 @@ func Generate() error {
 // service is one generated service: a directory holding a service.proto and
 // whatever message files it is accompanied by.
 type service struct {
-	// Name is the directory name.
+	// Name is the application name: the directory the declaration lives
+	// in, or its parent in the versioned layout.
 	Name string
 	// Dir is the directory, relative to the repository root and slash
 	// separated, since that is how buf and protobuf name files.
 	Dir string
 }
 
+// versionExp matches the version element of the versioned proto layout, in
+// buf's spelling: v1, v2, v1alpha1, v2beta1.
+var versionExp = regexp.MustCompile(`^v[0-9]+(?:[a-z]+[0-9]+)?$`)
+
+// discoverServices finds the service declarations under the proto root, in
+// either layout: "<root>/<application>/service.proto", which is what the fleet
+// has, and "<root>/<application>/<version>/service.proto", which is buf's
+// convention and what a new service is scaffolded into. A repository can hold
+// both, which is how one moves from the first to the second one service at a
+// time.
 func discoverServices(conf config) ([]service, error) {
-	matches, err := filepath.Glob(
-		filepath.Join(conf.ProtoRoot, "*", "service.proto"))
-	if err != nil {
-		return nil, fmt.Errorf("glob for proto services: %w", err)
+	layouts := []struct {
+		pattern []string
+		// name is the element of the matched directory that names the
+		// application, counted from the end.
+		nameFromEnd int
+	}{
+		{pattern: []string{"*", "service.proto"}, nameFromEnd: 1},
+		{pattern: []string{"*", "v*", "service.proto"}, nameFromEnd: 2},
 	}
 
 	var services []service
 
-	for _, p := range matches {
-		dir := filepath.ToSlash(filepath.Dir(p))
-
-		// The vendored protos are compiled as imports, never generated
-		// for: their Go code belongs to the module they came from.
-		if dir == conf.VendorDir || strings.HasPrefix(dir, conf.VendorDir+"/") {
-			continue
+	for _, l := range layouts {
+		matches, err := filepath.Glob(filepath.Join(
+			append([]string{conf.ProtoRoot}, l.pattern...)...))
+		if err != nil {
+			return nil, fmt.Errorf("glob for proto services: %w", err)
 		}
 
-		services = append(services, service{
-			Name: filepath.Base(dir),
-			Dir:  dir,
-		})
+		for _, p := range matches {
+			dir := filepath.ToSlash(filepath.Dir(p))
+
+			// The vendored protos are compiled as imports, never
+			// generated for: their Go code belongs to the module they
+			// came from.
+			if dir == conf.VendorDir ||
+				strings.HasPrefix(dir, conf.VendorDir+"/") {
+				continue
+			}
+
+			elements := strings.Split(dir, "/")
+
+			// A directory that only looks like a version — "vendor",
+			// "views" — is somebody else's, and its service.proto
+			// belongs to the flat layout one level up.
+			if l.nameFromEnd == 2 &&
+				!versionExp.MatchString(elements[len(elements)-1]) {
+				continue
+			}
+
+			services = append(services, service{
+				Name: elements[len(elements)-l.nameFromEnd],
+				Dir:  dir,
+			})
+		}
 	}
+
+	slices.SortFunc(services, func(a service, b service) int {
+		return strings.Compare(a.Dir, b.Dir)
+	})
 
 	return services, nil
 }
