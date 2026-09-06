@@ -31,10 +31,6 @@
 //   - service.rpc.go, the plain service interface itself, when the same
 //     plugin runs and Twirp is not generating that interface.
 //   - service.twirp.go, when Twirp generation is on.
-//   - docs/<service>-openapi.json, when OpenAPI generation is on, which by
-//     default is when Twirp generation is. The specification documents the
-//     "/twirp/" paths and Twirp's errors, so it says nothing true about a
-//     Connect only repository.
 //
 // A .proto file that declares no service is compiled to messages and
 // nothing else; the service plugins emit no file for it.
@@ -89,16 +85,6 @@ var (
 	// still serves the /twirp/ paths. Override: RPC_TWIRP.
 	Twirp = false
 
-	// OpenAPI turns the OpenAPI 3 specifications in ./docs on. It follows
-	// Twirp unless it is set, because protoc-gen-openapi3 documents the
-	// Twirp surface: the paths it writes are "/twirp/<pkg>.<Service>/
-	// <Method>" and the errors it declares are Twirp's, so a Connect only
-	// repository would commit a specification of an API it does not serve.
-	// Set it to OpenAPIOn to write the specifications anyway, or to
-	// OpenAPIOff to stop writing them while Twirp is still served.
-	// Override: RPC_OPENAPI.
-	OpenAPI = OpenAPIFollowsTwirp
-
 	// VendorDir is the proto root that VendorProto copies into, relative to
 	// the repository root. Its contents are compiled but never generated
 	// for: a vendored file's Go code comes from the module it was vendored
@@ -126,39 +112,10 @@ var (
 	ElephantRPCOptions []string
 )
 
-// OpenAPISetting says whether the OpenAPI 3 specifications are generated. The
-// zero value follows Twirp, which is the surface the specifications describe.
-type OpenAPISetting int
-
-const (
-	// OpenAPIFollowsTwirp writes the specifications when Twirp generation
-	// is on.
-	OpenAPIFollowsTwirp OpenAPISetting = iota
-	// OpenAPIOn always writes the specifications.
-	OpenAPIOn
-	// OpenAPIOff never writes the specifications.
-	OpenAPIOff
-)
-
-// enabled resolves the setting against the effective Twirp configuration.
-func (s OpenAPISetting) enabled(twirp bool) bool {
-	switch s {
-	case OpenAPIOn:
-		return true
-	case OpenAPIOff:
-		return false
-	case OpenAPIFollowsTwirp:
-		return twirp
-	}
-
-	return twirp
-}
-
 // Environment variables that override the configuration above for a single
 // run.
 const (
 	TwirpEnv           = "RPC_TWIRP"
-	OpenAPIEnv         = "RPC_OPENAPI"
 	VendorDirEnv       = "RPC_VENDOR_DIR"
 	ExtraProtoRootsEnv = "RPC_EXTRA_PROTO_ROOTS"
 )
@@ -167,7 +124,6 @@ const (
 // with the environment applied on top.
 type config struct {
 	Twirp           bool
-	OpenAPI         bool
 	VendorDir       string
 	ExtraProtoRoots []string
 	ProtoRoot       string
@@ -179,14 +135,8 @@ func loadConfig() (config, error) {
 		return config{}, err
 	}
 
-	openAPI, err := boolFromEnv(OpenAPIEnv, OpenAPI.enabled(twirp))
-	if err != nil {
-		return config{}, err
-	}
-
 	conf := config{
 		Twirp:           twirp,
-		OpenAPI:         openAPI,
 		VendorDir:       filepath.ToSlash(VendorDir),
 		ExtraProtoRoots: ExtraProtoRoots,
 	}
@@ -240,52 +190,10 @@ func protoRoot() (string, error) {
 	return ".", nil
 }
 
-// Generate compiles the service declarations in the repository and, where
-// OpenAPI generation is on, generates the OpenAPI 3 specifications for them.
-// The version stamped into the specifications is resolved from the last
-// ancestor git tag, and only when a specification is written: a Connect only
-// repository writes none, so it generates before it has been tagged at all.
+// Generate compiles the service declarations in the repository. It reads
+// nothing but the sources, so it runs in a repository that has never been
+// tagged, which is where a new service starts.
 func Generate() error {
-	return generateAll(versionFromGitTags)
-}
-
-// versionFromGitTags resolves the version to stamp into the OpenAPI
-// specifications from the last ancestor git tag.
-func versionFromGitTags() (string, error) {
-	v, err := internal.OutputSilent("git", "describe", "--tags", "--abbrev=0")
-	if err != nil {
-		return "", fmt.Errorf("resolve version from git tags: %w", err)
-	}
-
-	return strings.TrimSpace(v), nil
-}
-
-// Release runs the same generation as Generate, but stamps the provided
-// version into the OpenAPI specifications instead of resolving it from the
-// git tags.
-func Release(version string) error {
-	err := generateAll(func() (string, error) {
-		return version, nil
-	})
-	if err != nil {
-		return err
-	}
-
-	// This is a CLI target whose whole purpose is to instruct the user, so
-	// writing to stdout is intentional here.
-	fmt.Println("\nAdd and commit the changed files, then tag the release:") //nolint:forbidigo
-	fmt.Printf("\n  git tag %s\n\n", version)                                //nolint:forbidigo
-
-	return nil
-}
-
-// generateAll compiles every service the repository declares and, where
-// OpenAPI generation is on, writes their specifications.
-//
-// The version is resolved lazily because nothing but the specifications uses
-// it: a repository that writes none never asks for it, and so never needs a
-// git tag to generate from.
-func generateAll(version func() (string, error)) error {
 	conf, err := loadConfig()
 	if err != nil {
 		return err
@@ -301,40 +209,13 @@ func generateAll(version func() (string, error)) error {
 			"no %s/*/service.proto files to generate from", conf.ProtoRoot)
 	}
 
-	err = generateCode(conf, services)
-	if err != nil {
-		return err
-	}
-
-	if !conf.OpenAPI {
-		return nil
-	}
-
-	v, err := version()
-	if err != nil {
-		return err
-	}
-
-	err = internal.EnsureDirectory(docsDir)
-	if err != nil {
-		return fmt.Errorf("ensure docs directory: %w", err)
-	}
-
-	for _, s := range services {
-		err := generateOpenAPI(s, v)
-		if err != nil {
-			return fmt.Errorf("generate the %q specification: %w", s.Name, err)
-		}
-	}
-
-	return nil
+	return generateCode(conf, services)
 }
 
 // service is one generated service: a directory holding a service.proto and
 // whatever message files it is accompanied by.
 type service struct {
-	// Name is the directory name, which is also the application name the
-	// OpenAPI specification is stamped with.
+	// Name is the directory name.
 	Name string
 	// Dir is the directory, relative to the repository root and slash
 	// separated, since that is how buf and protobuf name files.

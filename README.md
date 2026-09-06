@@ -49,7 +49,11 @@ Per service, into the service's own directory:
 | `<package>connect/service.elephant.go` | `protoc-gen-elephant-rpc` |
 | `service.rpc.go` | `protoc-gen-elephant-rpc`, when Twirp is off |
 | `service.twirp.go` | `protoc-gen-twirp`, when Twirp is on |
-| `docs/<service>-openapi.json` | `protoc-gen-openapi3`, when OpenAPI is on |
+
+Nothing but Go is generated. The `twirp` namespace also wrote an OpenAPI 3
+specification per service; nobody consumed them and they described the Twirp
+surface only, so the `rpc` namespace does not carry them forward, and a
+repository adopting it deletes its `docs/*-openapi.json`.
 
 `protoc-gen-elephant-rpc` emits the Connect adapters that put Connect on the
 plain protobuf service interface: `New<Service>ServiceHandler`, which serves an
@@ -68,14 +72,10 @@ it is turned on, Twirp.
 
 ### `rpc:generate`
 
-Generate compiles the service declarations and, where OpenAPI is on, generates
-the OpenAPI 3 specifications. The version stamped into the specifications is
-resolved from the last ancestor git tag.
-
-### `rpc:release` "version"
-
-Release runs the same generation as `rpc:generate`, but stamps the provided
-version into the specifications instead of resolving it from the git tags.
+Generate compiles the service declarations. It reads nothing but the sources,
+so it works in a repository that has never been tagged. There is no
+`rpc:release`: nothing is stamped with a version any more, so a release is a
+plain git tag.
 
 ### `rpc:vendorProto` "module" "file"
 
@@ -126,7 +126,6 @@ func init() {
 | Variable | Environment | Default | Meaning |
 |---|---|---|---|
 | `rpc.Twirp` | `RPC_TWIRP` | off | Run `protoc-gen-twirp`. A new service is Connect only; an existing one turns it on for as long as it still serves the `/twirp/` paths. |
-| `rpc.OpenAPI` | `RPC_OPENAPI` | follows Twirp | Write the OpenAPI 3 specifications to `./docs`. `protoc-gen-openapi3` documents the Twirp surface — `/twirp/` paths, Twirp's error schema — so the default follows `rpc.Twirp` and a Connect-only repository writes no specification rather than one of an API it does not serve. `rpc.OpenAPIOn` writes them anyway, `rpc.OpenAPIOff` stops writing them while Twirp is still served. |
 | `rpc.VendorDir` | `RPC_VENDOR_DIR` | `rpc/vendor` | The proto root `rpc:vendorProto` copies into. |
 | `rpc.ExtraProtoRoots` | `RPC_EXTRA_PROTO_ROOTS` | none | Further directories to add to the buf workspace, for a repository that keeps protobuf sources outside the proto root. Their files are resolvable as imports and are not generated for. |
 | `rpc.ElephantRPCOptions` | — | `interface` follows Twirp | Extra options for `protoc-gen-elephant-rpc`. The one to know about is `interface`, which decides whether the plugin emits the plain service interface itself, and which is set here only to override the default of leaving it to `protoc-gen-twirp` for as long as Twirp is generated. |
