@@ -57,7 +57,7 @@ const (
 	// An empty version is an error rather than a skipped plugin;
 	// ELEPHANT_RPC_PLUGIN overrides it for developing the plugin against a
 	// repository.
-	ElephantRPCVersion = "v0.28.1-0.20260906072220-372646f2638f"
+	ElephantRPCVersion = "v0.28.1-0.20260906112735-0bd19b7ad4fc"
 )
 
 const (
