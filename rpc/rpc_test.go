@@ -161,8 +161,7 @@ func TestVendoredImport(t *testing.T) {
 
 // TestElephantRPCPluginOverride covers ELEPHANT_RPC_PLUGIN pointing at a
 // module checkout, which is how protoc-gen-elephant-rpc is developed against
-// a repository that generates with it, and the only way to run it at all
-// while it has no released version.
+// a repository that generates with it.
 func TestElephantRPCPluginOverride(t *testing.T) {
 	dir := t.TempDir()
 
@@ -214,18 +213,16 @@ func TestElephantRPCPluginOverrideInvalid(t *testing.T) {
 // and the interface option, and the code it emits has to compile against the
 // Connect code generated beside it.
 //
-// The plugin has no released version to pin, so the test runs only when
-// ELEPHANT_RPC_PLUGIN names a checkout or a "module@version". Point it at an
-// elephantine checkout to run it:
+// The plugin runs at the pinned version, or at whatever ELEPHANT_RPC_PLUGIN
+// names, so pointing that at an elephantine checkout is how a plugin change is
+// tested against this namespace before it is pinned:
 //
 //	ELEPHANT_RPC_PLUGIN=../elephantine go test ./rpc
 func TestElephantRPCPlugin(t *testing.T) {
-	plugin := os.Getenv(rpc.ElephantRPCPluginEnv)
-	if plugin == "" {
+	if rpc.ElephantRPCVersion == "" && os.Getenv(rpc.ElephantRPCPluginEnv) == "" {
 		t.Skipf(
-			"%s is unset, so there is no protoc-gen-elephant-rpc to run:"+
-				" set it to an elephantine checkout, or to a"+
-				" \"module@version\", to run this test",
+			"the plugin is neither pinned nor named by %s, so there is"+
+				" no protoc-gen-elephant-rpc to run",
 			rpc.ElephantRPCPluginEnv)
 	}
 
