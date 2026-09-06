@@ -103,10 +103,8 @@ generated code compile with no configuration of its own;
 `interface=true` while Twirp is still generated is refused, naming both: both
 plugins would write the interface and the package would not compile.
 
-The plugin is pinned to a pre-release commit of elephantine's
-`feature/connect-rpc` branch until that work is tagged; the pin then becomes the
-tag, and a `ttab/mage` bump is what moves it, as with every other generator. It
-cannot be turned off: an empty pin is an error rather than a run that quietly
+The plugin is pinned to the elephantine release that ships it, and a `ttab/mage`
+bump is what moves it, as with every other generator. It cannot be turned off: an empty pin is an error rather than a run that quietly
 leaves the adapters as they were.
 
 `protoc-gen-twirp` is the one generator that is not run as

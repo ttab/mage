@@ -52,12 +52,11 @@ const (
 
 	// ElephantRPCVersion pins protoc-gen-elephant-rpc, the plugin that
 	// emits the plain protobuf service interface and the Connect adapters
-	// around it. It is a pseudo-version of elephantine's feature/connect-rpc
-	// branch until that work is tagged, at which point it becomes the tag.
-	// An empty version is an error rather than a skipped plugin;
+	// around it. It is the elephantine release that ships the plugin. An
+	// empty version is an error rather than a skipped plugin;
 	// ELEPHANT_RPC_PLUGIN overrides it for developing the plugin against a
 	// repository.
-	ElephantRPCVersion = "v0.28.1-0.20260906112735-0bd19b7ad4fc"
+	ElephantRPCVersion = "v0.29.0"
 )
 
 const (

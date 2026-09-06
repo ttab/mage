@@ -4,6 +4,15 @@ Everything from v0.10.0 onwards is documented here; earlier releases are not
 reconstructed. The entries are derived from the release tags, and the linked
 pull requests hold the detail.
 
+## [v0.13.1] - 2026-09-06
+
+Changes:
+
+- `protoc-gen-elephant-rpc` is pinned to elephantine v0.29.0, the release that
+  ships it, instead of a pre-release commit of its feature branch. A repository
+  that generated with v0.13.0 regenerates to the same output, since the plugin
+  did not change between that commit and the tag.
+
 ## [v0.13.0] - 2026-09-06
 
 **Breaking (Go 1.27):** the module's `go` directive is 1.27.1, so a repository
