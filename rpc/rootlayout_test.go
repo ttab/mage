@@ -17,7 +17,6 @@ import (
 func TestVendoredImportRootLayout(t *testing.T) {
 	dir := t.TempDir()
 
-	withoutElephantRPCPlugin(t)
 	copyTree(t, filepath.Join("testdata", "vendored"), dir)
 
 	// Move the service from the rpc layout to the root layout.

@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package ttab.greeter.v1;
+
+option go_package = "github.com/ttab/rpcversionedfixture/rpc/greeter/v1;greeterv1";
+
+import "rpc/greeter/v1/types.proto";
+
+service Greeter {
+  rpc Hello(HelloRequest) returns (HelloResponse);
+}
+
+// HelloRequest is the greeting to answer.
+message HelloRequest {
+  // Name to greet.
+  string name = 1;
+}
+
+// HelloResponse carries the greeting.
+message HelloResponse {
+  // Greeting for the name in the request.
+  Greeting greeting = 1;
+}
