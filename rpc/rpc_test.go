@@ -1,7 +1,6 @@
 package rpc_test
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -48,7 +47,7 @@ func TestGenerate(t *testing.T) {
 			c.setup(t)
 			t.Chdir(dir)
 
-			err := rpc.Release("v1.2.3")
+			err := rpc.Generate()
 			if err != nil {
 				t.Fatalf("generate the fixture: %v", err)
 			}
@@ -78,17 +77,9 @@ func TestGenerate(t *testing.T) {
 			// is vendored into the repository.
 			mustNotExist(t, "buf.yaml")
 
-			// The specification documents the /twirp/ paths and
-			// Twirp's errors, so it follows Twirp: a Connect only
-			// repository would otherwise commit a document of an
-			// API it does not serve.
-			spec := filepath.Join("docs", "greeter-openapi.json")
-
-			if c.twirp {
-				checkSpec(t, spec, "greeter", "v1.2.3")
-			} else {
-				mustNotExist(t, spec)
-			}
+			// Nothing but Go is generated: the OpenAPI specifications
+			// the twirp namespace wrote are gone for good.
+			mustNotExist(t, "docs")
 
 			vetModule(t, dir)
 		})
@@ -96,9 +87,8 @@ func TestGenerate(t *testing.T) {
 }
 
 // TestGenerateWithoutGitTags covers a repository that has never been tagged,
-// which is where a new Connect-only service starts. The version is only ever
-// stamped into an OpenAPI specification, and a Connect-only repository writes
-// none, so generating must not go looking for one.
+// which is where a new service starts: generation reads nothing but the
+// sources, so it must not go looking for a version.
 func TestGenerateWithoutGitTags(t *testing.T) {
 	dir := t.TempDir()
 
@@ -113,7 +103,6 @@ func TestGenerateWithoutGitTags(t *testing.T) {
 
 	mustExist(t, filepath.Join("rpc", "greeter", "greeterconnect",
 		"service.connect.go"))
-	mustNotExist(t, filepath.Join("docs", "greeter-openapi.json"))
 }
 
 // TestVendoredImport covers the newsdoc case: a service that imports a proto
@@ -154,7 +143,7 @@ func TestVendoredImport(t *testing.T) {
 
 	t.Logf("buf.yaml:\n%s", config)
 
-	err = rpc.Release("v0.1.0")
+	err = rpc.Generate()
 	if err != nil {
 		t.Fatalf("generate the fixture: %v", err)
 	}
@@ -188,7 +177,7 @@ func TestElephantRPCPluginOverride(t *testing.T) {
 	t.Setenv(rpc.ElephantRPCPluginEnv, plugin)
 	t.Chdir(source)
 
-	err := rpc.Release("v1.2.3")
+	err := rpc.Generate()
 	if err != nil {
 		t.Fatalf("generate the fixture: %v", err)
 	}
@@ -213,7 +202,7 @@ func TestElephantRPCPluginOverrideInvalid(t *testing.T) {
 	t.Setenv(rpc.ElephantRPCPluginEnv, "github.com/ttab/elephantine")
 	t.Chdir(dir)
 
-	err := rpc.Release("v1.2.3")
+	err := rpc.Generate()
 	if err == nil {
 		t.Fatal("expected the generation to fail")
 	}
@@ -271,7 +260,7 @@ func TestElephantRPCPlugin(t *testing.T) {
 
 			t.Chdir(dir)
 
-			err := rpc.Release("v1.2.3")
+			err := rpc.Generate()
 			if err != nil {
 				t.Fatalf("generate the fixture: %v", err)
 			}
@@ -307,42 +296,6 @@ func withoutElephantRPCPlugin(t *testing.T) {
 	t.Helper()
 
 	t.Setenv(rpc.ElephantRPCPluginEnv, "")
-}
-
-// checkSpec asserts that the OpenAPI specification was generated, stamped
-// with the version, and given the servers the service is reachable at.
-func checkSpec(t *testing.T, path string, application string, version string) {
-	t.Helper()
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read the generated specification: %v", err)
-	}
-
-	var spec struct {
-		Info struct {
-			Version string `json:"version"`
-		} `json:"info"`
-		Servers []struct {
-			URL string `json:"url"`
-		} `json:"servers"`
-	}
-
-	err = json.Unmarshal(data, &spec)
-	if err != nil {
-		t.Fatalf("unmarshal the generated specification: %v", err)
-	}
-
-	if spec.Info.Version != version {
-		t.Errorf("got the specification version %q, wanted %q",
-			spec.Info.Version, version)
-	}
-
-	want := "https://" + application + ".api.tt.se"
-
-	if len(spec.Servers) == 0 || spec.Servers[0].URL != want {
-		t.Errorf("got the servers %v, wanted %q first", spec.Servers, want)
-	}
 }
 
 // vetModule checks that the generated code builds, which is the assertion

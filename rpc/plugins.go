@@ -31,9 +31,6 @@ const (
 	// serves the /twirp/ paths.
 	TwirpVersion = "v8.1.3"
 
-	// OpenAPI3Version pins the OpenAPI 3 generator.
-	OpenAPI3Version = "v0.2.9"
-
 	// ElephantRPCVersion pins protoc-gen-elephant-rpc, the plugin that
 	// emits the plain protobuf service interface and the Connect adapters
 	// around it. It is set to the elephantine release that ships the
@@ -48,7 +45,6 @@ const (
 	protocGenGoModule  = "google.golang.org/protobuf/cmd/protoc-gen-go"
 	connectGoModule    = "connectrpc.com/connect/cmd/protoc-gen-connect-go"
 	twirpModule        = "github.com/twitchtv/twirp/protoc-gen-twirp"
-	openAPI3Module     = "github.com/navigacontentlab/twopdocs/cmd/protoc-gen-openapi3"
 	elephantRPCModule  = "github.com/ttab/elephantine/cmd/protoc-gen-elephant-rpc"
 	elephantRPCCommand = "./cmd/protoc-gen-elephant-rpc"
 )

@@ -6,7 +6,6 @@ require (
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/magefile/mage v1.17.2
 	github.com/minio/minio-go/v7 v7.2.1
-	google.golang.org/protobuf v1.36.12
 )
 
 require (
