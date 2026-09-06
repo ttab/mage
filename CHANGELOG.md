@@ -6,6 +6,9 @@ pull requests hold the detail.
 
 ## [v0.13.0] - Unreleased
 
+**Breaking (Go 1.27):** the module's `go` directive is 1.27.1, so a repository
+that imports these targets needs a Go 1.27 toolchain to build its magefile.
+
 **New namespace (rpc):** `rpc:generate` is the protobuf generation path from
 here on, and it generates Connect code alongside the messages. It compiles with
 buf rather than protoc in the `elephant-twirptools` image, and runs buf and
@@ -77,6 +80,8 @@ Changes:
   only when that directory holds something other than the vendored protos.
 - The `twirp` namespace is deprecated. It is otherwise unchanged and keeps
   working for as long as the image exists.
+- Dependency upgrades: minio-go to v7.3.0, klauspost/compress to v1.20.0, and
+  the golang.org/x modules.
 
 ## [v0.12.0] - 2026-09-05
 
