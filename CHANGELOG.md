@@ -70,6 +70,10 @@ Changes:
   Connect generates into a subpackage and has to import the message package,
   which a relative path cannot be turned into. `rpc:stub` writes the full
   import path.
+- A repository that keeps its protos in the repository root can vendor an
+  import: the `rpc/vendor` directory `rpc:vendorProto` creates no longer makes
+  the targets believe the sources have moved to `rpc/`. The proto root is `rpc`
+  only when that directory holds something other than the vendored protos.
 - The `twirp` namespace is deprecated. It is otherwise unchanged and keeps
   working for as long as the image exists.
 

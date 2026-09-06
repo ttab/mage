@@ -82,10 +82,12 @@ func Stub(application, service, method string) error {
 // root of a repository that already has one, and "rpc" for a repository that
 // has no protobuf sources yet.
 func stubRoot() (string, error) {
-	root, err := protoRoot()
+	conf, err := loadConfig()
 	if err != nil {
 		return "", err
 	}
+
+	root := conf.ProtoRoot
 
 	if root != "." {
 		return root, nil
@@ -100,7 +102,7 @@ func stubRoot() (string, error) {
 		return ".", nil
 	}
 
-	return "rpc", nil
+	return rpcDir, nil
 }
 
 const stubTpl = `syntax = "proto3";

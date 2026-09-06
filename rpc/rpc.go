@@ -67,13 +67,14 @@
 package rpc
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
-
-	"github.com/ttab/mage/internal"
 )
 
 // Configuration for the generation targets. Set these from the importing
@@ -149,7 +150,7 @@ func loadConfig() (config, error) {
 		conf.ExtraProtoRoots = filepath.SplitList(v)
 	}
 
-	root, err := protoRoot()
+	root, err := protoRoot(conf.VendorDir)
 	if err != nil {
 		return config{}, err
 	}
@@ -173,18 +174,44 @@ func boolFromEnv(name string, fallback bool) (bool, error) {
 	return b, nil
 }
 
+// rpcDir is the directory a repository keeps its protobuf sources in when it
+// does not keep them in the repository root.
+const rpcDir = "rpc"
+
 // protoRoot returns the directory the protobuf sources are rooted in, which
-// is "rpc" where that directory exists and the repository root otherwise.
-// Both layouts are in use, and the import paths inside the .proto files are
-// written against the repository root either way.
-func protoRoot() (string, error) {
-	rpcRooted, err := internal.DirectoryExists("rpc")
-	if err != nil {
-		return "", fmt.Errorf("check for './rpc' directory: %w", err)
+// is "rpc" where that directory holds anything but the vendored protos, and
+// the repository root otherwise. Both layouts are in use, and the import
+// paths inside the .proto files are written against the repository root
+// either way.
+//
+// The vendored protos are the exception because they live under "rpc" by
+// default: a repository that keeps its services in the root and vendors an
+// import gets an rpc/vendor directory, and that must not be read as the
+// repository having moved its sources. An empty rpc directory does count as
+// the root, so that a repository can choose the layout before it has a
+// service to put in it.
+func protoRoot(vendorDir string) (string, error) {
+	entries, err := os.ReadDir(rpcDir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return ".", nil
 	}
 
-	if rpcRooted {
-		return "rpc", nil
+	if err != nil {
+		return "", fmt.Errorf("read the %s directory: %w", rpcDir, err)
+	}
+
+	if len(entries) == 0 {
+		return rpcDir, nil
+	}
+
+	for _, e := range entries {
+		p := path.Join(rpcDir, e.Name())
+
+		if p == vendorDir || strings.HasPrefix(vendorDir, p+"/") {
+			continue
+		}
+
+		return rpcDir, nil
 	}
 
 	return ".", nil
