@@ -24,6 +24,8 @@ import (
 
 This will allow you to run the sql targets using: `mage sql:target-name`.
 
+The module needs Go 1.27, which is the fleet's floor.
+
 ## RPC tasks
 
 Compiles protobuf service declarations into Go, with [buf](https://buf.build/)
