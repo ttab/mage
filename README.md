@@ -66,9 +66,9 @@ The option follows `rpc.Twirp`, which is what makes a Connect-only repository's
 generated code compile with no configuration of its own;
 `rpc.ElephantRPCOptions` overrides it.
 
-The plugin is skipped until elephantine has tagged a release containing it, so
-a repository generating today gets the messages and the Connect code and, where
-it is turned on, Twirp.
+The plugin is pinned to a pre-release commit of elephantine's
+`feature/connect-rpc` branch until that work is tagged; the pin then becomes the
+tag, and a `ttab/mage` bump is what moves it, as with every other generator.
 
 ### `rpc:generate`
 
@@ -135,10 +135,8 @@ a CI job or a one-off regeneration uses rather than editing the magefile.
 
 ### Developing `protoc-gen-elephant-rpc`
 
-`ELEPHANT_RPC_PLUGIN` replaces the pinned plugin command, and works whether or
-not the pin is set — which it is not, until elephantine tags a release with the
-plugin in it. Point it at a module checkout to generate a repository with a
-plugin you are editing:
+`ELEPHANT_RPC_PLUGIN` replaces the pinned plugin command. Point it at a module
+checkout to generate a repository with a plugin you are editing:
 
 ``` shell
 ELEPHANT_RPC_PLUGIN=../elephantine mage rpc:generate
@@ -147,10 +145,9 @@ ELEPHANT_RPC_PLUGIN=../elephantine mage rpc:generate
 It also takes a `module@version`, for generating against a plugin version other
 than the pinned one.
 
-The same variable runs this module's own end-to-end test of the plugin, which
-generates the fixture repository with it and checks that the emitted code
-compiles. It is skipped when the variable is unset, since there is no released
-version to fall back on:
+The same variable makes this module's own end-to-end test of the plugin, which
+generates the fixture repository and checks that the emitted code compiles, run
+against the checkout instead of the pinned version:
 
 ``` shell
 ELEPHANT_RPC_PLUGIN=../elephantine go test ./rpc

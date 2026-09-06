@@ -54,10 +54,11 @@ Changes:
   it for a single run, which is what a CI job or a one-off regeneration uses
   rather than editing the magefile.
 - `protoc-gen-elephant-rpc`, which emits the Connect adapters that put Connect
-  on the plain protobuf service interface, is part of the plugin set but has no
-  release to pin yet, so it is skipped. `ELEPHANT_RPC_PLUGIN` runs it anyway,
-  from a `module@version` or from a module checkout, which is how the plugin is
-  developed against a repository that generates with it. Its `interface`
+  on the plain protobuf service interface, is part of the plugin set, pinned
+  to a pre-release commit of elephantine until that work is tagged.
+  `ELEPHANT_RPC_PLUGIN` overrides the pin with a `module@version` or a module
+  checkout, which is how the plugin is developed against a repository that
+  generates with it. Its `interface`
   option, which makes it write the plain service interface itself to
   `service.rpc.go`, follows `rpc.Twirp`: `protoc-gen-twirp` owns that interface
   for as long as it is generated and the plugin takes it over when it is not,
