@@ -4,7 +4,7 @@ Everything from v0.10.0 onwards is documented here; earlier releases are not
 reconstructed. The entries are derived from the release tags, and the linked
 pull requests hold the detail.
 
-## [v0.13.0] - Unreleased
+## [v0.13.0] - 2026-09-06
 
 **Breaking (Go 1.27):** the module's `go` directive is 1.27.1, so a repository
 that imports these targets needs a Go 1.27 toolchain to build its magefile. The
