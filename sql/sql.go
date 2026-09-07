@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	sqlTools = "ghcr.io/ttab/elephant-sqltools:v0.1.3"
+	sqlTools = "ghcr.io/ttab/elephant-sqltools:v0.2.1"
 
 	postgresImage   = "docker.io/pgvector/pgvector:pg17"
 	postgresImage18 = "docker.io/pgvector/pgvector:pg18"
@@ -77,7 +77,7 @@ func Generate() error {
 
 	sqlc := SqlcCommand()
 
-	err = sqlc("--experimental", "generate")
+	err = sqlc("generate")
 	if err != nil {
 		return fmt.Errorf("sqlc: %w", err)
 	}

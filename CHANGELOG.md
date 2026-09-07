@@ -4,6 +4,51 @@ Everything from v0.10.0 onwards is documented here; earlier releases are not
 reconstructed. The entries are derived from the release tags, and the linked
 pull requests hold the detail.
 
+## [v0.14.0] - 2026-09-07
+
+**Behaviour change (generated code):** the sqltools image moves from v0.1.3 to
+v0.2.1, which carries sqlc v1.31.1 where v0.1.3 carried v1.25.0 — six minor
+versions — so the next `sql:generate` in a project produces a diff beyond the
+version stamp. Three changes in that range alter or block generation: a model
+whose name ends in `metadata` was named incorrectly and is now renamed
+(v1.28.0), `xid8` columns map to `pgtype.Uint64` under pgx/v5 (v1.31.0), and an
+invalid column reference in `ON CONFLICT DO UPDATE` is rejected instead of
+silently generating code (v1.31.0). Neither the `metadata` suffix nor `xid8`
+occurs in the elephant repositories today, but `ON CONFLICT DO UPDATE` is
+widespread, so regenerate deliberately in each project rather than discovering
+the diff mid-feature. `sql:generate` also stops passing `--experimental` to
+sqlc: the flag was deprecated and read by nothing in v1.25.0 and removed
+outright in v1.26.0, so the new image fails the invocation with `unknown flag:
+--experimental`.
+
+**Behaviour change (migrations):** the first `sql:migrate` against a database
+that an earlier image migrated alters its version table. From tern v2.3.6 the
+migrator checks `public.schema_version` for a primary key at startup and issues
+`alter table public.schema_version add primary key (version)` when there is
+none, whether or not there are migrations to apply. The table holds a single
+row, so the `ACCESS EXCLUSIVE` lock is taken and released immediately and no
+maintenance window is needed — but it is DDL issued by the migrator rather than
+by a migration file, and `sql:migrate` goes wherever `CONN_STRING` points, not
+only to a local development database.
+
+Changes:
+
+- tern upgraded from v2.1.1 to v2.4.3. Beyond the version table, it splits
+  statements correctly when a migration contains dollar-quoted blocks (v2.2.1),
+  which previously broke function and trigger bodies, and fixes connection
+  setting precedence (v2.4.2) and port handling when `sslmode` is unset
+  (v2.2.2).
+- `CONN_STRING` can use `sslmode=verify-full&sslrootcert=system` for
+  `sql:migrate` and `sql:rollback`. The pgx in the old image predated
+  `sslrootcert=system` and read `system` as a filename, failing with `unable to
+  read CA file: open system`, and it stopped at the first resolved address
+  rather than falling back to the next, so a host with no IPv6 route could not
+  reach an AAAA-first provider at all. A connection string that was downgraded
+  to `sslmode=require` to work around this can move back.
+- sqlc upgraded from v1.25.0 to v1.31.1. The image itself is built on Debian 13
+  (trixie) rather than Debian 12, and its arm64 build is cross-compiled rather
+  than emulated.
+
 ## [v0.13.1] - 2026-09-06
 
 Changes:
