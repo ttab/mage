@@ -39,13 +39,19 @@ type bufPlugin struct {
 }
 
 // generateCode runs the protobuf plugins over the discovered services.
+//
+// It is two buf runs rather than one, because the two service shapes get
+// different plugin lists and buf takes one template per run. A shape with no
+// services in it is not run at all. Everything the two runs have in common —
+// the pins, the generator environment, the import path overrides and the
+// output root — is worked out once.
 func generateCode(conf config, services []service) error {
 	err := ensureBufConfig(conf)
 	if err != nil {
 		return err
 	}
 
-	opts, err := pluginOptions(services)
+	opts, err := pluginOptions(conf, services)
 	if err != nil {
 		return err
 	}
@@ -67,28 +73,55 @@ func generateCode(conf config, services []service) error {
 		_ = os.RemoveAll(work)
 	}()
 
-	tpl := bufTemplate{Version: "v2"}
+	var dualStack, native []service
 
-	tpl.Plugins = append(tpl.Plugins,
-		bufPlugin{
-			Local: goRun(protocGenGoModule, ProtocGenGoVersion),
-			Out:   ".",
-			Opt:   opts,
-		},
-		bufPlugin{
-			Local: goRun(connectGoModule, ConnectGoVersion),
-			Out:   ".",
-			Opt:   opts,
-		})
+	for _, s := range services {
+		if s.Native {
+			native = append(native, s)
+		} else {
+			dualStack = append(dualStack, s)
+		}
+	}
+
+	if len(dualStack) > 0 {
+		tpl, err := dualStackTemplate(conf, opts, work)
+		if err != nil {
+			return err
+		}
+
+		err = runGenerate(env, tpl, dualStack)
+		if err != nil {
+			return err
+		}
+	}
+
+	if len(native) > 0 {
+		err = runGenerate(env, nativeTemplate(conf, opts), native)
+		if err != nil {
+			return err
+		}
+	}
+
+	return removeStaleInterfaces(conf, services)
+}
+
+// dualStackTemplate is the plugin list for a service that serves the plain
+// protobuf interface: the messages, Connect, the adapters that put Connect on
+// that interface, and Twirp while a repository still serves the /twirp/
+// paths.
+func dualStackTemplate(
+	conf config, opts []string, work string,
+) (bufTemplate, error) {
+	tpl := nativeTemplate(conf, opts)
 
 	elephantRPC, err := elephantRPCPlugin()
 	if err != nil {
-		return err
+		return bufTemplate{}, err
 	}
 
 	tpl.Plugins = append(tpl.Plugins, bufPlugin{
 		Local: elephantRPC,
-		Out:   ".",
+		Out:   conf.ProtoRoot,
 		Opt: append(append([]string{}, opts...),
 			elephantRPCOptions(conf)...),
 	})
@@ -96,36 +129,78 @@ func generateCode(conf config, services []service) error {
 	if conf.Twirp {
 		twirp, err := twirpGenerator(work)
 		if err != nil {
-			return err
+			return bufTemplate{}, err
 		}
 
 		tpl.Plugins = append(tpl.Plugins, bufPlugin{
 			Local: twirp,
-			Out:   ".",
+			Out:   conf.ProtoRoot,
 			Opt:   opts,
 		})
 	}
 
+	return tpl, nil
+}
+
+// nativeTemplate is the plugin list for a service that implements connect-go's
+// own handler interface: the messages and Connect, and nothing of ours. It is
+// also the first two plugins of the dual-stack list.
+//
+// The output root is the proto root rather than the repository root, because
+// buf names a file relative to the module root and the module is rooted in the
+// proto root. Source relative output then lands the generated code next to the
+// declaration it came from, which is where it has always been.
+func nativeTemplate(conf config, opts []string) bufTemplate {
+	return bufTemplate{
+		Version: "v2",
+		Plugins: []bufPlugin{
+			{
+				Local: goRun(protocGenGoModule, ProtocGenGoVersion),
+				Out:   conf.ProtoRoot,
+				Opt:   opts,
+			},
+			{
+				Local: goRun(connectGoModule, ConnectGoVersion),
+				Out:   conf.ProtoRoot,
+				Opt:   opts,
+			},
+		},
+	}
+}
+
+// runGenerate runs one generation over the given services.
+func runGenerate(
+	env map[string]string, tpl bufTemplate, services []service,
+) error {
 	data, err := json.Marshal(tpl)
 	if err != nil {
 		return fmt.Errorf("marshal the buf template: %w", err)
 	}
 
-	args := []string{"generate", "--template", string(data)}
-
-	// Without --path buf would generate for every file in the workspace,
-	// vendored imports included, and their Go code belongs to the module
-	// they were vendored out of.
-	for _, s := range services {
-		args = append(args, "--path", s.Dir)
-	}
+	args := append([]string{"generate", "--template", string(data)},
+		pathArgs(services)...)
 
 	err = buf(env, args...)
 	if err != nil {
 		return fmt.Errorf("run buf generate: %w", err)
 	}
 
-	return removeStaleInterfaces(conf, services)
+	return nil
+}
+
+// pathArgs scopes a buf run to the repository's own service declarations.
+// Without them buf would take in every file in the workspace, vendored
+// imports included: their Go code belongs to the module they were vendored
+// out of, and so do the lint and breaking change rules they were written
+// against.
+func pathArgs(services []service) []string {
+	var args []string
+
+	for _, s := range services {
+		args = append(args, "--path", s.Dir)
+	}
+
+	return args
 }
 
 // buf runs the pinned protobuf compiler.
@@ -149,6 +224,9 @@ func buf(env map[string]string, args ...string) error {
 const (
 	twirpSuffix        = ".twirp.go"
 	rpcInterfaceSuffix = ".rpc.go"
+	// elephantSuffix is the Connect adapters, which live in the connect
+	// package one directory below the declaration.
+	elephantSuffix = ".elephant.go"
 )
 
 // The header a plugin writes as the first line of its output. A file without
@@ -158,22 +236,59 @@ const (
 	elephantRPCHeader = "// Code generated by protoc-gen-elephant-rpc"
 )
 
+// staleFile is a generated file that has to go, and the header that says a
+// generator wrote it.
+type staleFile struct {
+	// Dir is a glob for the directory to look in, since the adapters are
+	// written into a connect package whose name comes from the
+	// declaration.
+	Dir    string
+	Suffix string
+	Header string
+}
+
 // removeStaleInterfaces deletes what a plugin that did not run this time
 // wrote the last time it did.
+//
+// For a dual-stack service that is whichever of the two plain interface
+// declarations is not being written. A native service is generated for by
+// neither plugin, so both of them are stale for it, and so are the adapters:
+// they take and return an interface that is no longer declared, so leaving
+// them behind is a package that does not compile.
 func removeStaleInterfaces(conf config, services []service) error {
-	stale := map[string]string{}
+	for _, s := range services {
+		var stale []staleFile
 
-	if !conf.Twirp {
-		stale[twirpSuffix] = twirpHeader
-	}
+		switch {
+		case s.Native:
+			stale = []staleFile{
+				{Dir: s.Dir, Suffix: twirpSuffix, Header: twirpHeader},
+				{Dir: s.Dir, Suffix: rpcInterfaceSuffix, Header: elephantRPCHeader},
+				// The adapters are in "<declaration>/<package>connect".
+				{
+					Dir:    path.Join(s.Dir, "*"),
+					Suffix: elephantSuffix,
+					Header: elephantRPCHeader,
+				},
+			}
+		default:
+			if !conf.Twirp {
+				stale = append(stale, staleFile{
+					Dir: s.Dir, Suffix: twirpSuffix, Header: twirpHeader,
+				})
+			}
 
-	if !interfaceEnabled(conf) {
-		stale[rpcInterfaceSuffix] = elephantRPCHeader
-	}
+			if !interfaceEnabled(conf) {
+				stale = append(stale, staleFile{
+					Dir:    s.Dir,
+					Suffix: rpcInterfaceSuffix,
+					Header: elephantRPCHeader,
+				})
+			}
+		}
 
-	for suffix, header := range stale {
-		for _, s := range services {
-			err := removeGenerated(s.Dir, suffix, header)
+		for _, f := range stale {
+			err := removeGenerated(f.Dir, f.Suffix, f.Header)
 			if err != nil {
 				return err
 			}
@@ -229,10 +344,10 @@ func hasHeader(file string, header string) (bool, error) {
 // output, so that a file is generated next to the .proto it came from, and
 // the Go import path of every proto file that does not declare a usable one
 // itself.
-func pluginOptions(services []service) ([]string, error) {
+func pluginOptions(conf config, services []service) ([]string, error) {
 	opts := []string{"paths=source_relative"}
 
-	mappings, err := goImportPathOverrides(services)
+	mappings, err := goImportPathOverrides(conf, services)
 	if err != nil {
 		return nil, err
 	}
@@ -262,7 +377,9 @@ var goPackageExp = regexp.MustCompile(
 // into a package that imports itself under a name nothing provides, and the
 // failure lands on whoever next builds the repository rather than on whoever
 // wrote the declaration.
-func goImportPathOverrides(services []service) ([]string, error) {
+// An override is keyed on the name buf knows the file by, which is relative
+// to the buf module root rather than to the repository root.
+func goImportPathOverrides(conf config, services []service) ([]string, error) {
 	module, err := modulePath()
 	if err != nil {
 		return nil, err
@@ -290,7 +407,7 @@ func goImportPathOverrides(services []service) ([]string, error) {
 
 			if path == "" || strings.HasPrefix(path, ".") {
 				opts = append(opts, fmt.Sprintf("M%s=%s",
-					filepath.ToSlash(f), wanted))
+					bufName(conf, f), wanted))
 
 				continue
 			}
@@ -326,6 +443,20 @@ func declaredGoPackage(file string) (string, error) {
 	return string(match[1]), nil
 }
 
+// bufName returns the name buf knows a file by. buf names a file relative to
+// the root of the module it belongs to, and the module the repository's own
+// declarations are in is rooted in the proto root, so a path from the
+// repository root is not what a plugin option or a file descriptor says.
+func bufName(conf config, file string) string {
+	p := filepath.ToSlash(file)
+
+	if conf.ProtoRoot == "." {
+		return p
+	}
+
+	return strings.TrimPrefix(p, conf.ProtoRoot+"/")
+}
+
 func protoFiles(dir string) ([]string, error) {
 	files, err := filepath.Glob(filepath.Join(dir, "*.proto"))
 	if err != nil {
@@ -351,19 +482,26 @@ func modulePath() (string, error) {
 }
 
 // ensureBufConfig writes the buf workspace configuration, when the workspace
-// needs one. A single module rooted in the repository is what buf assumes
-// with no configuration at all, and that is the common case.
+// needs one. A repository that keeps its protobuf sources in the repository
+// root and vendors nothing needs none: a single module rooted where buf is
+// run is what buf assumes with no configuration at all.
+//
+// Everything else needs one, for one of two reasons. A proto root under "rpc"
+// has to be the module root, since that is what buf checks a package name and
+// resolves an import against. A vendored proto root has to be a module of its
+// own, since a vendored file keeps the path it had in the repository it came
+// from.
 func ensureBufConfig(conf config) error {
 	roots, err := workspaceRoots(conf)
 	if err != nil {
 		return err
 	}
 
-	if len(roots) == 0 {
+	if conf.ProtoRoot == "." && len(roots) == 0 {
 		return nil
 	}
 
-	wanted := bufConfig(roots)
+	wanted := bufConfig(conf.ProtoRoot, roots)
 
 	current, err := os.ReadFile(bufConfigName)
 	if err != nil && !os.IsNotExist(err) {
@@ -373,11 +511,12 @@ func ensureBufConfig(conf config) error {
 	if len(current) > 0 && !strings.HasPrefix(string(current), bufConfigMarker) {
 		// Somebody wrote their own workspace configuration. Buf lint and
 		// breaking change rules live in the same file, so overwriting it
-		// would throw those away. It still has to declare the roots: the
-		// only reason the repository needs a workspace at all is that a
-		// proto root outside the repository root has to resolve, and one
-		// that is missing here leaves buf unable to find the import.
-		return checkBufConfig(current, roots)
+		// would throw those away. It still has to describe the roots:
+		// the module root decides where the generated code lands and
+		// what a package name is checked against, and a vendored root
+		// that is not a module of its own leaves buf unable to find the
+		// import it was vendored in for.
+		return checkBufConfig(current, conf.ProtoRoot, roots)
 	}
 
 	if string(current) == wanted {
@@ -424,7 +563,7 @@ type bufWorkspace struct {
 // checkBufConfig reports what a hand-written buf.yaml is missing. Reporting
 // it is all it does: lint and breaking change rules live in the same file, so
 // the fix is somebody's editorial decision rather than a rewrite.
-func checkBufConfig(data []byte, roots []string) error {
+func checkBufConfig(data []byte, root string, roots []string) error {
 	var workspace bufWorkspace
 
 	err := yaml.Unmarshal(data, &workspace)
@@ -442,7 +581,7 @@ func checkBufConfig(data []byte, roots []string) error {
 		p := path.Clean(m.Path)
 		declared[p] = true
 
-		if p != "." {
+		if p != root {
 			continue
 		}
 
@@ -453,6 +592,15 @@ func checkBufConfig(data []byte, roots []string) error {
 
 	var missing []string
 
+	if !declared[root] {
+		missing = append(missing, fmt.Sprintf(
+			"the proto root %q is not the module root, and buf checks a"+
+				" package name and resolves an import against the"+
+				" module root: declare it as %q, rather than as any"+
+				" directory above it",
+			root, "  - path: "+root))
+	}
+
 	for _, r := range roots {
 		if !declared[r] {
 			missing = append(missing, fmt.Sprintf(
@@ -460,12 +608,12 @@ func checkBufConfig(data []byte, roots []string) error {
 				r, "  - path: "+r))
 		}
 
-		if !excluded[r] {
+		if withinRoot(root, r) && !excluded[r] {
 			missing = append(missing, fmt.Sprintf(
-				"%q is not excluded from the module rooted in the"+
-					" repository, so buf sees every file in it"+
-					" twice: add %q to that module's excludes",
-				r, "      - "+r))
+				"%q is not excluded from the module rooted in %q, so"+
+					" buf sees every file in it twice: add %q to"+
+					" that module's excludes",
+				r, root, "      - "+r))
 		}
 	}
 
@@ -479,23 +627,50 @@ func checkBufConfig(data []byte, roots []string) error {
 		bufConfigName, strings.Join(missing, "; "))
 }
 
-func bufConfig(roots []string) string {
+// withinRoot reports whether a directory is inside a module root, and so has
+// to be excluded from it to keep buf from reading its files twice.
+func withinRoot(root string, dir string) bool {
+	if root == "." {
+		return true
+	}
+
+	return dir == root || strings.HasPrefix(dir, root+"/")
+}
+
+func bufConfig(root string, roots []string) string {
 	var b strings.Builder
 
 	b.WriteString(bufConfigMarker)
 	b.WriteString(`
 #
+# The module root is the proto root. buf checks a file's package against the
+# directory it is in relative to the module root, and resolves an import
+# against the same root, so a declaration under a proto root is only itself
+# from a module rooted there.
+#
 # A vendored protobuf file is imported by the path it has in the repository
 # it came from, so its directory has to be a module root of its own, and be
-# excluded from the module rooted here.
+# excluded from the module above when it is inside it.
 version: v2
 modules:
-  - path: .
-    excludes:
 `)
 
+	fmt.Fprintf(&b, "  - path: %s\n", root)
+
+	var inside []string
+
 	for _, r := range roots {
-		fmt.Fprintf(&b, "      - %s\n", r)
+		if withinRoot(root, r) {
+			inside = append(inside, r)
+		}
+	}
+
+	if len(inside) > 0 {
+		b.WriteString("    excludes:\n")
+
+		for _, r := range inside {
+			fmt.Fprintf(&b, "      - %s\n", r)
+		}
 	}
 
 	for _, r := range roots {
