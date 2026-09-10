@@ -4,7 +4,7 @@ package ttab.greeter;
 
 option go_package = "./rpc/greeter";
 
-import "rpc/greeter/types.proto";
+import "greeter/types.proto";
 
 service Greeter {
   rpc Hello(HelloRequest) returns (HelloResponse);
