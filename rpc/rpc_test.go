@@ -28,6 +28,12 @@ const (
 // flat layout is dual stack, the versioned one is native, and DualStack
 // overrides the layout.
 func TestGenerate(t *testing.T) {
+	// The flat-layout fixture, named once for the cases that share it.
+	const (
+		flatFixture = "greeter"
+		flatConnect = "greeterconnect"
+	)
+
 	cases := []struct {
 		name string
 		// fixture is the repository the case generates.
@@ -46,9 +52,9 @@ func TestGenerate(t *testing.T) {
 			// The environment override is what a CI job or a one-off
 			// regeneration uses.
 			name:    "twirp through the environment",
-			fixture: "greeter",
+			fixture: flatFixture,
 			dir:     filepath.Join("rpc", "greeter"),
-			connect: "greeterconnect",
+			connect: flatConnect,
 			twirp:   true,
 			setup: func(t *testing.T) {
 				t.Helper()
@@ -59,9 +65,9 @@ func TestGenerate(t *testing.T) {
 			// The flat layout is a dual-stack service, and this is
 			// what it generates today.
 			name:    "connect only",
-			fixture: "greeter",
+			fixture: flatFixture,
 			dir:     filepath.Join("rpc", "greeter"),
-			connect: "greeterconnect",
+			connect: flatConnect,
 			twirp:   false,
 			setup:   func(_ *testing.T) {},
 		},
@@ -106,17 +112,56 @@ func TestGenerate(t *testing.T) {
 			},
 		},
 		{
-			// DualStack is the way back for a legacy service that
-			// moves to the versioned layout before its Twirp
-			// callers are gone.
+			// The way back for a legacy service that moves to the
+			// versioned layout before its Twirp callers are gone.
+			// The shape says Twirp whatever the repository-wide
+			// default is, which is what makes retiring Twirp a
+			// per-service decision.
 			name:    "dual stack forced on a versioned service",
 			fixture: versionedFixture,
 			dir:     filepath.Join("rpc", "greeter", "v1"),
 			connect: versionedConnect,
+			twirp:   true,
+			setup: func(t *testing.T) {
+				t.Helper()
+				withShapes(t, map[string]rpc.Shape{
+					versionedDir: rpc.ShapeDualStack,
+				})
+			},
+		},
+		{
+			// The shape the layout cannot express: an existing
+			// flat-layout service on connect-go's own interface,
+			// without moving and so without changing the proto
+			// package that is in its procedure path.
+			name:    "native forced on a flat service",
+			fixture: flatFixture,
+			dir:     filepath.Join("rpc", "greeter"),
+			connect: flatConnect,
+			native:  true,
+			setup: func(t *testing.T) {
+				t.Helper()
+				t.Setenv(rpc.TwirpEnv, "true")
+				withShapes(t, map[string]rpc.Shape{
+					"rpc/greeter": rpc.ShapeNative,
+				})
+			},
+		},
+		{
+			// Connect only on the plain interface: no Twirp, and
+			// protoc-gen-elephant-rpc writes the interface that
+			// protoc-gen-twirp used to.
+			name:    "connect forced on one service while twirp is on",
+			fixture: flatFixture,
+			dir:     filepath.Join("rpc", "greeter"),
+			connect: flatConnect,
 			twirp:   false,
 			setup: func(t *testing.T) {
 				t.Helper()
-				withDualStack(t, versionedDir)
+				t.Setenv(rpc.TwirpEnv, "true")
+				withShapes(t, map[string]rpc.Shape{
+					"rpc/greeter": rpc.ShapeConnect,
+				})
 			},
 		},
 		{
@@ -129,7 +174,8 @@ func TestGenerate(t *testing.T) {
 			twirp:   true,
 			setup: func(t *testing.T) {
 				t.Helper()
-				t.Setenv(rpc.DualStackEnv, versionedDir)
+				t.Setenv(rpc.ShapesEnv,
+					versionedDir+"="+string(rpc.ShapeDualStack))
 				t.Setenv(rpc.TwirpEnv, "true")
 			},
 		},
@@ -265,7 +311,7 @@ func TestDualStackNamesAService(t *testing.T) {
 	dir := t.TempDir()
 
 	copyTree(t, filepath.Join("testdata", versionedFixture), dir)
-	t.Setenv(rpc.DualStackEnv, "greeter/v1")
+	t.Setenv(rpc.ShapesEnv, "greeter/v1="+string(rpc.ShapeNative))
 	t.Chdir(dir)
 
 	err := rpc.Generate()
@@ -301,11 +347,11 @@ func TestNativeServiceRemovesTheAdapters(t *testing.T) {
 		handWritten   = filepath.Join(connect, "manual.elephant.go")
 	)
 
-	withDualStack(t, versionedDir)
+	withShapes(t, map[string]rpc.Shape{versionedDir: rpc.ShapeConnect})
 
 	err := rpc.Generate()
 	if err != nil {
-		t.Fatalf("generate the dual-stack service: %v", err)
+		t.Fatalf("generate the service with its adapters: %v", err)
 	}
 
 	mustExist(t, adapters)
@@ -320,7 +366,7 @@ func TestNativeServiceRemovesTheAdapters(t *testing.T) {
 		t.Fatalf("write the hand-written file: %v", err)
 	}
 
-	withDualStack(t)
+	withShapes(t, nil)
 
 	err = rpc.Generate()
 	if err != nil {
@@ -1031,16 +1077,16 @@ func TestElephantRPCPluginOverrideEmpty(t *testing.T) {
 	mustNotExist(t, filepath.Join("rpc", "greeter", "service.pb.go"))
 }
 
-// withDualStack sets the service directories that generate dual stack for the
+// withShapes overrides the shape of the named service directories for the
 // length of a test.
-func withDualStack(t *testing.T, dirs ...string) {
+func withShapes(t *testing.T, shapes map[string]rpc.Shape) {
 	t.Helper()
 
-	previous := rpc.DualStack
-	rpc.DualStack = dirs
+	previous := rpc.Shapes
+	rpc.Shapes = shapes
 
 	t.Cleanup(func() {
-		rpc.DualStack = previous
+		rpc.Shapes = previous
 	})
 }
 

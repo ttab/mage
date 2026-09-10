@@ -38,18 +38,22 @@ the bump's pull request. A repository whose proto root *is* the repository
 root, which is elephant-api, is unaffected: it needs no `buf.yaml` and still
 gets none.
 
-**Behaviour change (what a versioned declaration generates):** the layout now
-says which shape a service is. A declaration in the flat layout,
-`<proto root>/<application>/service.proto`, is dual stack and generates exactly
-what it did before. A declaration whose own directory is a version is native:
-`protoc-gen-go` and `protoc-gen-connect-go` only, so no
-`<package>connect/service.elephant.go`, no `service.rpc.go` and no
-`service.twirp.go`, and it may declare streaming methods, which a dual-stack
-service cannot. A service already in the versioned layout that still serves the
-`/twirp/` paths therefore loses its adapters and its plain interface on the
-next `rpc:generate` unless it is named in the new `rpc.DualStack`, which forces
-the old behaviour whatever the layout. Regeneration removes the files that are
-no longer generated, the adapters included, since they take and return an
+**Behaviour change (what a versioned declaration generates):** a service now
+has one of three shapes — `rpc.ShapeDualStack`, which serves Connect and the
+`/twirp/` paths on the plain protobuf service interface; `rpc.ShapeConnect`,
+which serves Connect only on that same interface; and `rpc.ShapeNative`, which
+serves Connect only on connect-go's own generated handler interface and is the
+one shape that may declare streaming methods. The layout picks the default and
+`rpc.Shapes` overrides it per service. A declaration in the flat layout
+defaults to `ShapeDualStack` while Twirp is on and `ShapeConnect` when it is
+off, which is what it generated before either way. A declaration whose own
+directory is a version defaults to `ShapeNative`, so it gets `protoc-gen-go`
+and `protoc-gen-connect-go` only: no `<package>connect/service.elephant.go`, no
+`service.rpc.go` and no `service.twirp.go`. **A service already in the
+versioned layout that still serves the `/twirp/` paths therefore loses its
+adapters and its plain interface on the next `rpc:generate` unless
+`rpc.Shapes` names it `ShapeDualStack`.** Regeneration removes what is no
+longer generated, the adapters included, since they take and return an
 interface that would no longer be declared.
 
 **Behaviour change (`rpc:stub`):** a stub is written to
@@ -83,11 +87,25 @@ Changes:
   `fetch-depth: 0`. `rpc:format` rewrites the declarations in buf's
   formatting and `rpc:formatCheck` reports what it would rewrite without
   touching anything, which is what a CI job runs.
-- `rpc.DualStack`, with the `RPC_DUAL_STACK` override, names the service
-  directories that generate dual stack whatever their layout, for a legacy
-  service that moves to the versioned layout before its Twirp callers are gone.
-  An entry that names no discovered service is an error rather than a setting
-  with no effect.
+- `rpc.Shapes`, with the `RPC_SHAPES` override, sets a service's shape by
+  directory and overrides what its layout would imply. It goes both ways, and
+  the second direction is the point: a versioned service can be held at
+  `ShapeDualStack` while it still has Twirp callers, and an existing
+  flat-layout service can be moved to `ShapeNative` or `ShapeConnect` where it
+  stands. A service's proto package is in its procedure path and the versioned
+  layout is what puts a version in the package, so a service that could only
+  reach `ShapeNative` by moving directory would have to break every caller's
+  path to get there; naming it here changes what it generates and nothing
+  else. Retiring Twirp is the same story one shape down — `rpc.Twirp` is a
+  repository-wide default, and `ShapeConnect` is how one service leaves it
+  without waiting for the rest. A key naming no discovered service, or a shape
+  that is not one of the three, is an error rather than a setting with no
+  effect.
+- `rpc.ElephantRPCOptions` may no longer set the plugin's `interface` option.
+  Which generator declares the plain service interface follows the shape, and
+  the option applies to every service at once, so it could only contradict a
+  per-service shape. Generation refuses it and names `rpc.Shapes` instead.
+  Nothing in the fleet set it.
 - Service discovery finds a `service.proto` at any depth under the proto root
   rather than only one or two directories down, which is what a declaration
   mirroring a package with a prefix in it — `elephant.<app>.v1` in

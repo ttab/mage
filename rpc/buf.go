@@ -73,46 +73,48 @@ func generateCode(conf config, services []service) error {
 		_ = os.RemoveAll(work)
 	}()
 
-	var dualStack, native []service
+	// One run per shape, since the plugin list and the plugin options both
+	// follow the shape: whether protoc-gen-twirp runs at all, and which
+	// generator is told to write the plain service interface.
+	byShape := make(map[Shape][]service, len(shapes))
 
 	for _, s := range services {
-		if s.Native {
-			native = append(native, s)
-		} else {
-			dualStack = append(dualStack, s)
-		}
+		byShape[s.Shape] = append(byShape[s.Shape], s)
 	}
 
-	if len(dualStack) > 0 {
-		tpl, err := dualStackTemplate(conf, opts, work)
+	// Ordered, so that a run is reproducible and a failure names the same
+	// shape twice running.
+	for _, shape := range shapes {
+		batch := byShape[shape]
+		if len(batch) == 0 {
+			continue
+		}
+
+		tpl, err := shapeTemplate(conf, opts, work, shape)
 		if err != nil {
 			return err
 		}
 
-		err = runGenerate(env, tpl, dualStack)
+		err = runGenerate(env, tpl, batch)
 		if err != nil {
-			return err
+			return fmt.Errorf("generate the %s services: %w", shape, err)
 		}
 	}
 
-	if len(native) > 0 {
-		err = runGenerate(env, nativeTemplate(conf, opts), native)
-		if err != nil {
-			return err
-		}
-	}
-
-	return removeStaleInterfaces(conf, services)
+	return removeStaleInterfaces(services)
 }
 
-// dualStackTemplate is the plugin list for a service that serves the plain
-// protobuf interface: the messages, Connect, the adapters that put Connect on
-// that interface, and Twirp while a repository still serves the /twirp/
-// paths.
-func dualStackTemplate(
-	conf config, opts []string, work string,
+// shapeTemplate is buf's generation configuration for one shape: the messages
+// and the Connect code for every shape, the adapters for the two that have a
+// plain service interface, and Twirp for the one that serves it.
+func shapeTemplate(
+	conf config, opts []string, work string, shape Shape,
 ) (bufTemplate, error) {
-	tpl := nativeTemplate(conf, opts)
+	tpl := messageTemplate(conf, opts)
+
+	if !shape.Adapters() {
+		return tpl, nil
+	}
 
 	elephantRPC, err := elephantRPCPlugin()
 	if err != nil {
@@ -123,34 +125,36 @@ func dualStackTemplate(
 		Local: elephantRPC,
 		Out:   conf.ProtoRoot,
 		Opt: append(append([]string{}, opts...),
-			elephantRPCOptions(conf)...),
+			elephantRPCOptions(shape)...),
 	})
 
-	if conf.Twirp {
-		twirp, err := twirpGenerator(work)
-		if err != nil {
-			return bufTemplate{}, err
-		}
-
-		tpl.Plugins = append(tpl.Plugins, bufPlugin{
-			Local: twirp,
-			Out:   conf.ProtoRoot,
-			Opt:   opts,
-		})
+	if shape != ShapeDualStack {
+		return tpl, nil
 	}
+
+	twirp, err := twirpGenerator(work)
+	if err != nil {
+		return bufTemplate{}, err
+	}
+
+	tpl.Plugins = append(tpl.Plugins, bufPlugin{
+		Local: twirp,
+		Out:   conf.ProtoRoot,
+		Opt:   opts,
+	})
 
 	return tpl, nil
 }
 
-// nativeTemplate is the plugin list for a service that implements connect-go's
-// own handler interface: the messages and Connect, and nothing of ours. It is
-// also the first two plugins of the dual-stack list.
+// messageTemplate is the plugin list every shape starts from: the messages and
+// the Connect code, and nothing of ours. It is the whole list for
+// ShapeNative.
 //
 // The output root is the proto root rather than the repository root, because
 // buf names a file relative to the module root and the module is rooted in the
 // proto root. Source relative output then lands the generated code next to the
 // declaration it came from, which is where it has always been.
-func nativeTemplate(conf config, opts []string) bufTemplate {
+func messageTemplate(conf config, opts []string) bufTemplate {
 	return bufTemplate{
 		Version: "v2",
 		Plugins: []bufPlugin{
@@ -247,44 +251,39 @@ type staleFile struct {
 	Header string
 }
 
-// removeStaleInterfaces deletes what a plugin that did not run this time
-// wrote the last time it did.
+// removeStaleInterfaces deletes, per service, what a generator that did not
+// run for it this time wrote the last time it did. Exactly one file declares
+// the plain protobuf service interface, and which one depends on the shape, so
+// changing a service's shape leaves the other behind — two declarations of the
+// same interface in one package, which does not compile.
 //
-// For a dual-stack service that is whichever of the two plain interface
-// declarations is not being written. A native service is generated for by
-// neither plugin, so both of them are stale for it, and so are the adapters:
-// they take and return an interface that is no longer declared, so leaving
-// them behind is a package that does not compile.
-func removeStaleInterfaces(conf config, services []service) error {
+// Only a file carrying a generator's header is removed; a hand-written one of
+// the same name is somebody's source and is left alone.
+func removeStaleInterfaces(services []service) error {
 	for _, s := range services {
 		var stale []staleFile
 
-		switch {
-		case s.Native:
-			stale = []staleFile{
-				{Dir: s.Dir, Suffix: twirpSuffix, Header: twirpHeader},
-				{Dir: s.Dir, Suffix: rpcInterfaceSuffix, Header: elephantRPCHeader},
-				// The adapters are in "<declaration>/<package>connect".
-				{
-					Dir:    path.Join(s.Dir, "*"),
-					Suffix: elephantSuffix,
-					Header: elephantRPCHeader,
-				},
-			}
-		default:
-			if !conf.Twirp {
-				stale = append(stale, staleFile{
-					Dir: s.Dir, Suffix: twirpSuffix, Header: twirpHeader,
-				})
-			}
+		if s.Shape != ShapeDualStack {
+			stale = append(stale, staleFile{
+				Dir: s.Dir, Suffix: twirpSuffix, Header: twirpHeader,
+			})
+		}
 
-			if !interfaceEnabled(conf) {
-				stale = append(stale, staleFile{
-					Dir:    s.Dir,
-					Suffix: rpcInterfaceSuffix,
-					Header: elephantRPCHeader,
-				})
-			}
+		if s.Shape != ShapeConnect {
+			stale = append(stale, staleFile{
+				Dir:    s.Dir,
+				Suffix: rpcInterfaceSuffix,
+				Header: elephantRPCHeader,
+			})
+		}
+
+		if !s.Shape.Adapters() {
+			// The adapters are in "<declaration>/<package>connect".
+			stale = append(stale, staleFile{
+				Dir:    path.Join(s.Dir, "*"),
+				Suffix: elephantSuffix,
+				Header: elephantRPCHeader,
+			})
 		}
 
 		for _, f := range stale {

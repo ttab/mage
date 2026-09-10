@@ -61,23 +61,49 @@ walk skips `vendor`, `node_modules` and `testdata` directories, and anything
 beginning with a dot: a dependency's checkout is not this repository's
 declaration, and a fixture belongs to the test that reads it.
 
-**The layout says which shape a service is.** A declaration in the flat
-layout, `<proto root>/<application>/service.proto`, is a *dual-stack* service:
-it implements the plain protobuf interface, serves Connect through the
-generated adapters, and serves the `/twirp/` paths while `rpc.Twirp` is set.
-That is what the fleet grew up with, and nothing new is written into it.
+**A service has one of three shapes**, and the shape decides what is generated
+for it:
 
-A declaration whose own directory is a version — `<proto root>/<application>/v1`,
-and `<proto root>/elephant/<application>/v1` for a package with a prefix in it —
-is a *native* service. It implements connect-go's own handler interface, gets
-`protoc-gen-go` and `protoc-gen-connect-go` output and nothing else, and may
-declare streaming methods, which a dual-stack service cannot: both
-`protoc-gen-elephant-rpc` and `protoc-gen-twirp` fail generation on a stream.
-That is the shape `rpc:stub` scaffolds and the shape a new service has. A
-repository can hold both while it moves one service at a time, and
-`rpc.DualStack` names the service directories that stay dual stack whatever
-their layout, for a legacy service that moves to the versioned layout before
-its Twirp callers are gone.
+| Shape | Serves | Implements | Generates |
+|---|---|---|---|
+| `rpc.ShapeDualStack` | Connect and `/twirp/` | the plain protobuf service interface | messages, Connect, the adapters, Twirp |
+| `rpc.ShapeConnect` | Connect | the same plain interface | messages, Connect, the adapters, `service.rpc.go` |
+| `rpc.ShapeNative` | Connect | connect-go's own handler interface | messages, Connect |
+
+Only `ShapeNative` may declare a streaming method: both
+`protoc-gen-elephant-rpc` and `protoc-gen-twirp` fail generation on a stream,
+since the plain interface returns one response and has no room for one.
+
+**The layout picks the default and `rpc.Shapes` overrides it per service.** A
+declaration in the flat layout, `<proto root>/<application>/service.proto`, is
+what the fleet grew up with and defaults to `ShapeDualStack` while `rpc.Twirp`
+is set, `ShapeConnect` when it is not. A declaration whose own directory is a
+version — `<proto root>/elephant/<application>/v1` — defaults to
+`ShapeNative`. That is what `rpc:stub` scaffolds, and nothing new goes into the
+flat layout.
+
+The override matters in both directions:
+
+```go
+rpc.Twirp = true
+
+rpc.Shapes = map[string]rpc.Shape{
+    // Off Twirp and onto connect-go's own interface, without moving
+    // and so without changing the paths its callers use.
+    "repository": rpc.ShapeNative,
+    // Moved to the versioned layout, still has Twirp callers.
+    "rpc/elephant/collab/v1": rpc.ShapeDualStack,
+}
+```
+
+The first of those is why `rpc.Shapes` is a map and not a list of exceptions to
+the layout rule. A service's proto package is in its procedure path, and the
+versioned layout is what puts a version in the package — so if the layout alone
+decided the shape, an existing service could reach `ShapeNative` only by moving
+directory, which changes its package and breaks every caller's path. Naming it
+here changes what it generates and nothing else. Retiring Twirp is the same
+story one shape down: `rpc.Twirp` is a repository-wide default, and
+`ShapeConnect` is how one service leaves it without waiting for the rest.
 
 A `go_package` that names an import path has to name the one the generated code
 lands under, `<module path>/<directory>`, and generation refuses one that does
@@ -281,7 +307,7 @@ func init() {
 | Variable | Environment | Default | Meaning |
 |---|---|---|---|
 | `rpc.Twirp` | `RPC_TWIRP` | off | Run `protoc-gen-twirp`. A new service is Connect only; an existing one turns it on for as long as it still serves the `/twirp/` paths. |
-| `rpc.DualStack` | `RPC_DUAL_STACK` | none | Service directories, relative to the repository root, that generate dual stack whatever their layout. For a legacy service that moves to the versioned layout before its Twirp callers are gone. An entry that names no discovered service is an error. |
+| `rpc.Shapes` | `RPC_SHAPES` | none | Per-service shape overrides, keyed on the service directory relative to the repository root. The environment form is `<directory>=<shape>` entries separated by the platform's path list separator. A key that names no discovered service is an error, as is a shape that is not `dual-stack`, `connect` or `native`. |
 | `rpc.BreakingAgainst` | `RPC_BREAKING_AGAINST` | `.git#branch=main` | The buf input `rpc:breaking` compares against. A branch is resolved against the checkout, `origin/<branch>` included, so a CI job needs the history: `actions/checkout` with `fetch-depth: 0`. |
 | `rpc.VendorDir` | `RPC_VENDOR_DIR` | `rpc/vendor` | The proto root `rpc:vendorProto` copies into. |
 | `rpc.ExtraProtoRoots` | `RPC_EXTRA_PROTO_ROOTS` | none | Further directories to add to the buf workspace, for a repository that keeps protobuf sources outside the proto root. Their files are resolvable as imports and are not generated for. |

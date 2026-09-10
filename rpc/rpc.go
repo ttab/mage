@@ -24,31 +24,44 @@
 // a dot. What is generated for a declaration depends on which shape it is,
 // and the layout is what says so.
 //
-// A declaration in the flat layout, "<proto root>/<application>/service.proto",
-// is a dual-stack service: it serves Connect and, while Twirp is on, the
-// /twirp/ paths as well. Into the service's own directory:
+// There are three shapes. ShapeDualStack serves Connect and the /twirp/ paths
+// side by side, ShapeConnect serves Connect only on the same plain protobuf
+// service interface, and ShapeNative serves Connect only on connect-go's own
+// generated handler interface. Into the service's own directory:
 //
-//   - service.pb.go, the messages (protoc-gen-go).
+//   - service.pb.go, the messages (protoc-gen-go), for every shape.
 //   - <package>connect/service.connect.go, the Connect client and handler
-//     (protoc-gen-connect-go).
+//     (protoc-gen-connect-go), for every shape.
 //   - <package>connect/service.elephant.go, the adapters that put Connect on
-//     the plain protobuf service interface (protoc-gen-elephant-rpc).
-//   - service.rpc.go, the plain service interface itself, when the same
-//     plugin runs and Twirp is not generating that interface.
-//   - service.twirp.go, when Twirp generation is on.
+//     the plain protobuf service interface (protoc-gen-elephant-rpc), for
+//     ShapeDualStack and ShapeConnect.
+//   - service.rpc.go, the plain service interface itself, for ShapeConnect —
+//     the shape where no protoc-gen-twirp run declares it.
+//   - service.twirp.go, for ShapeDualStack.
 //
-// A declaration in the versioned layout, whose directory is a version — v1,
-// v2beta1 — is a native service: it implements connect-go's own handler
-// interface and never serves Twirp. It gets protoc-gen-go and
-// protoc-gen-connect-go output and nothing else: no adapters, no plain
-// service interface, no Twirp, and, because nothing of ours has to fit a
-// stream into a signature that returns one response, streaming methods are
-// allowed. That is the shape rpc:stub scaffolds, and the one a new service
-// has; nothing new goes into the flat layout.
+// Only ShapeNative may declare a streaming method: both
+// protoc-gen-elephant-rpc and protoc-gen-twirp fail generation on a stream,
+// since the plain interface returns one response and has no room for one.
 //
-// DualStack overrides the rule for a named service directory, for a legacy
-// service that moves to the versioned layout while it still has Twirp
-// callers.
+// The layout picks the default, and Shapes overrides it per service. A
+// declaration in the flat layout, "<proto root>/<application>/service.proto",
+// is what the fleet grew up with and defaults to ShapeDualStack while Twirp
+// is on and ShapeConnect when it is off. A declaration whose own directory is
+// a version — v1, v2beta1 — defaults to ShapeNative; that is what rpc:stub
+// scaffolds, and nothing new goes into the flat layout.
+//
+// The default is not the whole rule, and the override matters in both
+// directions. A versioned service can be held at ShapeDualStack while it
+// still has Twirp callers. And — the case the layout cannot express — an
+// existing flat-layout service can be moved to ShapeNative or ShapeConnect
+// where it stands. That last one is why Shapes exists: a service's proto
+// package is in its procedure path and the versioned layout is what puts a
+// version in the package, so deriving the shape from the layout alone would
+// mean an existing service could only reach ShapeNative by moving, and so by
+// breaking the paths its callers use. Naming it in Shapes changes what it
+// generates and nothing else. Retiring Twirp is the same story one shape
+// down: Twirp is a repository-wide default, and ShapeConnect is how one
+// service leaves it without waiting for the rest.
 //
 // A .proto file that declares no service is compiled to messages and
 // nothing else; the service plugins emit no file for it.
@@ -149,6 +162,54 @@ import (
 	"strings"
 )
 
+// Shape is what a service generates, and so which interface its
+// implementation has and which protocols it serves.
+type Shape string
+
+const (
+	// ShapeDualStack serves the /twirp/ paths and Connect side by side.
+	// It generates the messages, the Connect code, the adapters that put
+	// Connect on the plain protobuf service interface, and Twirp — which
+	// is what declares that interface.
+	ShapeDualStack Shape = "dual-stack"
+
+	// ShapeConnect serves Connect only, on the plain protobuf service
+	// interface: dual stack without the Twirp mount, so
+	// protoc-gen-elephant-rpc declares the interface instead of
+	// protoc-gen-twirp. It is what a service retiring Twirp becomes, and
+	// it keeps every path and every handler signature it had.
+	//
+	// A streaming method is still not possible: the plain interface
+	// returns one response and has no room for a stream.
+	ShapeConnect Shape = "connect"
+
+	// ShapeNative serves Connect only, on connect-go's own generated
+	// handler interface. It generates the messages and the Connect code
+	// and nothing else: no adapters, no plain interface, no Twirp.
+	// Streaming methods are allowed.
+	//
+	// Moving a service here changes the signatures its implementation and
+	// its Go callers compile against. It does not change its proto
+	// package, its service name, its procedure paths or its encoding, so
+	// nothing on the wire moves and no caller has to be deployed in step.
+	ShapeNative Shape = "native"
+)
+
+// shapes is every valid Shape, for validation and for the error message that
+// lists them.
+var shapes = []Shape{ShapeDualStack, ShapeConnect, ShapeNative}
+
+// Adapters reports whether the shape generates the Connect adapters and the
+// plain protobuf service interface, which is every shape but the native one.
+func (s Shape) Adapters() bool {
+	return s != ShapeNative
+}
+
+// String implements fmt.Stringer.
+func (s Shape) String() string {
+	return string(s)
+}
+
 // Configuration for the generation targets. Set these from the importing
 // magefile; every one of them can be overridden for a single run with the
 // environment variable named in its documentation.
@@ -158,22 +219,36 @@ var (
 	// still serves the /twirp/ paths. Override: RPC_TWIRP.
 	Twirp = false
 
-	// DualStack lists the service directories that generate dual stack
-	// whatever their layout: the Connect adapters, the plain service
-	// interface, and Twirp while Twirp is on. It is for a legacy service
-	// that moves to the versioned layout before its Twirp callers are
-	// gone; without it the versioned layout means native.
+	// Shapes overrides, per service, what that service generates. A
+	// service that is not named here takes its shape from its layout: a
+	// declaration in the flat layout is ShapeDualStack when Twirp is on
+	// and ShapeConnect when it is off, and one in the versioned layout is
+	// ShapeNative.
 	//
-	// The entries are directories relative to the repository root, the
-	// same paths service discovery reports:
+	// The keys are directories relative to the repository root, the same
+	// paths service discovery reports:
 	//
-	//	rpc.DualStack = []string{"rpc/elephant/collab/v1"}
+	//	rpc.Shapes = map[string]rpc.Shape{
+	//		// Off Twirp and onto connect-go's own interface,
+	//		// without moving and so without changing its paths.
+	//		"repository": rpc.ShapeNative,
+	//		// Moved layout, still has Twirp callers.
+	//		"rpc/elephant/collab/v1": rpc.ShapeDualStack,
+	//	}
 	//
-	// An entry that names no discovered service is an error rather than a
-	// setting with no effect, since a typo here silently changes what a
-	// service generates. Override: RPC_DUAL_STACK, separated by the
-	// platform's path list separator.
-	DualStack []string
+	// Both directions matter, and the second is why this is a map rather
+	// than a list. A service's proto package is in its procedure path, and
+	// the versioned layout is what puts a version in the package, so
+	// deriving the shape from the layout alone would mean an existing
+	// service could only reach ShapeNative by moving — changing the path
+	// its callers use. Naming it here changes what it generates and
+	// nothing else.
+	//
+	// A key that names no discovered service is an error rather than a
+	// setting with no effect, since a typo silently changes what a service
+	// generates. Override: RPC_SHAPES, "<directory>=<shape>" entries
+	// separated by the platform's path list separator.
+	Shapes map[string]Shape
 
 	// VendorDir is the proto root that VendorProto copies into, relative to
 	// the repository root. Its contents are compiled but never generated
@@ -218,7 +293,7 @@ const DefaultBreakingAgainst = ".git#branch=main"
 // run.
 const (
 	TwirpEnv           = "RPC_TWIRP"
-	DualStackEnv       = "RPC_DUAL_STACK"
+	ShapesEnv          = "RPC_SHAPES"
 	VendorDirEnv       = "RPC_VENDOR_DIR"
 	ExtraProtoRootsEnv = "RPC_EXTRA_PROTO_ROOTS"
 	BreakingAgainstEnv = "RPC_BREAKING_AGAINST"
@@ -228,7 +303,7 @@ const (
 // with the environment applied on top.
 type config struct {
 	Twirp           bool
-	DualStack       []string
+	Shapes          map[string]Shape
 	VendorDir       string
 	ExtraProtoRoots []string
 	ProtoRoot       string
@@ -242,13 +317,16 @@ func loadConfig() (config, error) {
 
 	conf := config{
 		Twirp:           twirp,
-		DualStack:       DualStack,
+		Shapes:          Shapes,
 		VendorDir:       filepath.ToSlash(VendorDir),
 		ExtraProtoRoots: ExtraProtoRoots,
 	}
 
-	if v := os.Getenv(DualStackEnv); v != "" {
-		conf.DualStack = filepath.SplitList(v)
+	if v := os.Getenv(ShapesEnv); v != "" {
+		conf.Shapes, err = parseShapes(filepath.SplitList(v))
+		if err != nil {
+			return config{}, err
+		}
 	}
 
 	if v := os.Getenv(VendorDirEnv); v != "" {
@@ -269,45 +347,36 @@ func loadConfig() (config, error) {
 	return conf, nil
 }
 
-// checkInterfaceOwner refuses the one configuration that cannot compile:
-// protoc-gen-twirp and protoc-gen-elephant-rpc both writing the plain service
-// interface. Neither plugin runs for a native service, so the question only
-// arises when the run has a dual-stack service in it.
+// checkInterfaceOwner refuses the one configuration that cannot compile: two
+// generators writing the plain protobuf service interface into the same
+// package.
+//
+// A service's shape decides which of them writes it — protoc-gen-twirp for
+// ShapeDualStack, protoc-gen-elephant-rpc for ShapeConnect, neither for
+// ShapeNative — so ElephantRPCOptions setting the option itself can only
+// contradict that, and does so for every service at once where the shape is
+// per service. Set the shape instead.
 func checkInterfaceOwner(conf config, services []service) error {
-	if !conf.Twirp {
-		return nil
-	}
-
-	dualStack := slices.ContainsFunc(services, func(s service) bool {
-		return !s.Native
-	})
-	if !dualStack {
-		return nil
-	}
+	_ = conf
+	_ = services
 
 	value, ok := optionValue(ElephantRPCOptions, interfaceOption)
 	if !ok {
 		return nil
 	}
 
-	on, err := strconv.ParseBool(value)
-	if err != nil {
-		return fmt.Errorf(
-			"parse the protoc-gen-elephant-rpc %q option %q as a boolean: %w",
-			interfaceOption, value, err)
-	}
-
-	if !on {
-		return nil
-	}
-
 	return fmt.Errorf(
-		"twirp generation is on (rpc.Twirp or %s) and rpc.ElephantRPCOptions"+
-			" asks protoc-gen-elephant-rpc for %s=true, but both write the"+
-			" plain service interface — protoc-gen-twirp into service.twirp.go"+
-			" and the plugin into service.rpc.go — so the generated package"+
-			" would declare it twice and would not compile: turn one of them off",
-		TwirpEnv, interfaceOption)
+		"rpc.ElephantRPCOptions sets the protoc-gen-elephant-rpc %q option"+
+			" to %q, but which generator writes the plain service"+
+			" interface follows the service's shape —"+
+			" protoc-gen-twirp into service.twirp.go for %s,"+
+			" protoc-gen-elephant-rpc into service.rpc.go for %s, and"+
+			" neither for %s — so setting it here can only contradict"+
+			" that, and does so for every service at once where the"+
+			" shape is per service: drop the option and set rpc.Shapes"+
+			" (or %s) for the services that need a different shape",
+		interfaceOption, value,
+		ShapeDualStack, ShapeConnect, ShapeNative, ShapesEnv)
 }
 
 func boolFromEnv(name string, fallback bool) (bool, error) {
@@ -376,7 +445,7 @@ func Generate() error {
 		return err
 	}
 
-	err = applyDualStack(conf, services)
+	err = applyShapes(conf, services)
 	if err != nil {
 		return err
 	}
@@ -424,35 +493,46 @@ type service struct {
 	// Versioned reports whether the declaration is in the versioned
 	// layout, which is to say that the directory it lives in is a version.
 	Versioned bool
-	// Native reports whether the service implements connect-go's own
-	// handler interface, which is what the versioned layout means unless
-	// DualStack says otherwise. A native service gets no adapters, no
-	// plain service interface and no Twirp.
-	Native bool
+	// Shape is what the service generates: its layout's default, or the
+	// override Shapes names for its directory.
+	Shape Shape
 }
 
-// applyDualStack decides each service's shape: the versioned layout is native
-// unless DualStack names the directory. An entry that names no discovered
-// service is refused rather than ignored, since the mistake it usually is —
-// a path spelled from the proto root rather than from the repository root —
-// otherwise shows up as a service that quietly stopped generating its Twirp
-// code.
-func applyDualStack(conf config, services []service) error {
-	named := make(map[string]bool, len(conf.DualStack))
+// applyShapes gives every service its shape: the layout's default, with the
+// Shapes override on top.
+//
+// The default is the common case rather than the whole rule. A flat-layout
+// declaration is what the fleet grew up with and is dual stack while Twirp is
+// on; a versioned one is what rpc:stub writes and is native. The override is
+// what makes the two independent of each other, which matters in both
+// directions: a versioned service can keep the adapters while it still has
+// Twirp callers, and — the case the layout cannot express — an existing
+// service can move to connect-go's own interface without moving directory,
+// and so without changing the proto package that is in its procedure path.
+func applyShapes(conf config, services []service) error {
+	named := make(map[string]Shape, len(conf.Shapes))
 
-	for _, d := range conf.DualStack {
-		named[path.Clean(filepath.ToSlash(d))] = true
+	for dir, shape := range conf.Shapes {
+		err := shape.validate()
+		if err != nil {
+			return fmt.Errorf("the shape of %q: %w", dir, err)
+		}
+
+		named[path.Clean(filepath.ToSlash(dir))] = shape
 	}
 
 	matched := make(map[string]bool, len(named))
 
 	for i := range services {
-		dual := named[services[i].Dir]
-		if dual {
-			matched[services[i].Dir] = true
+		services[i].Shape = defaultShape(conf, services[i])
+
+		shape, ok := named[services[i].Dir]
+		if !ok {
+			continue
 		}
 
-		services[i].Native = services[i].Versioned && !dual
+		services[i].Shape = shape
+		matched[services[i].Dir] = true
 	}
 
 	var unknown []string
@@ -475,11 +555,61 @@ func applyDualStack(conf config, services []service) error {
 	}
 
 	return fmt.Errorf(
-		"rpc.DualStack (or %s) names %s, which is not a service directory"+
+		"rpc.Shapes (or %s) names %s, which is not a service directory"+
 			" in this repository: the directories are relative to the"+
 			" repository root, and the discovered ones are %s",
-		DualStackEnv, strings.Join(unknown, ", "),
+		ShapesEnv, strings.Join(unknown, ", "),
 		strings.Join(discovered, ", "))
+}
+
+// defaultShape is the shape a service takes from its layout when Shapes does
+// not name it.
+func defaultShape(conf config, s service) Shape {
+	switch {
+	case s.Versioned:
+		return ShapeNative
+	case conf.Twirp:
+		return ShapeDualStack
+	default:
+		return ShapeConnect
+	}
+}
+
+// validate reports whether the shape is one this package knows.
+func (s Shape) validate() error {
+	if slices.Contains(shapes, s) {
+		return nil
+	}
+
+	names := make([]string, len(shapes))
+	for i, v := range shapes {
+		names[i] = string(v)
+	}
+
+	return fmt.Errorf("%q is not a service shape, which is one of %s",
+		string(s), strings.Join(names, ", "))
+}
+
+// parseShapes reads the RPC_SHAPES entries, each "<directory>=<shape>".
+func parseShapes(entries []string) (map[string]Shape, error) {
+	out := make(map[string]Shape, len(entries))
+
+	for _, e := range entries {
+		dir, shape, ok := strings.Cut(e, "=")
+		if !ok || dir == "" {
+			return nil, fmt.Errorf(
+				"%s entry %q is not \"<directory>=<shape>\"", ShapesEnv, e)
+		}
+
+		err := Shape(shape).validate()
+		if err != nil {
+			return nil, fmt.Errorf("%s entry %q: %w", ShapesEnv, e, err)
+		}
+
+		out[dir] = Shape(shape)
+	}
+
+	return out, nil
 }
 
 // versionExp matches the version element of the versioned proto layout, in
