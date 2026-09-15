@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package elephant.collab.v1;
+
+option go_package = "github.com/ttab/rpcnativefixture/rpc/elephant/collab/v1;collabv1";
+
+// SessionState is a message type declared without a service, to keep the
+// service plugins honest: they must compile it and emit nothing for it.
+message SessionState {
+  // Revision of the session.
+  int64 revision = 1;
+}
+
+// SessionUpdate is one message in a session stream.
+message SessionUpdate {
+  // Revision the update takes the session to.
+  int64 revision = 1;
+}

@@ -25,11 +25,30 @@ var (
 // somebody copies it into when the two have to be served side by side.
 const StubVersion = "v1"
 
+// StubPackagePrefix is the first element of a stubbed declaration's protobuf
+// package, and of the directory under the proto root that mirrors it. The
+// package is what a Connect procedure path is built out of, so it names the
+// fleet the service belongs to rather than the organisation that runs it.
+const StubPackagePrefix = "elephant"
+
+// StubServiceSuffix is what a stubbed service name ends in, since buf's
+// SERVICE_SUFFIX rule says so. A name that already has it keeps it rather
+// than gaining a second one.
+const StubServiceSuffix = "Service"
+
 // Stub generates a protobuf service stub in the repository's proto root,
-// under "<application>/v1". That is buf's layout, and it is the one that
-// leaves room for a second version of a declaration. The flat layout the
-// fleet grew up with is still discovered and generated for; nothing new is
-// written into it.
+// under "elephant/<application>/v1", declaring the package
+// "elephant.<application>.v1".
+//
+// That is a native service: the versioned layout is what makes it one, so it
+// serves Connect only, implements connect-go's own handler interface and may
+// declare streaming methods. The flat layout the fleet grew up with is still
+// discovered and generated for; nothing new is written into it.
+//
+// The directory mirrors the package because buf checks one against the other
+// relative to the module root, which is the proto root. A stub passes buf's
+// STANDARD lint rules as it is written, with no exemptions, which is what
+// "mage rpc:lint" reports.
 func Stub(application, service, method string) error {
 	if !applicationExp.MatchString(application) {
 		return errors.New(
@@ -44,6 +63,10 @@ func Stub(application, service, method string) error {
 		return fmt.Errorf("method %s", messageConstraint)
 	}
 
+	if !strings.HasSuffix(service, StubServiceSuffix) {
+		service += StubServiceSuffix
+	}
+
 	root, err := stubRoot()
 	if err != nil {
 		return err
@@ -54,7 +77,7 @@ func Stub(application, service, method string) error {
 		return err
 	}
 
-	dir := filepath.Join(root, application, StubVersion)
+	dir := filepath.Join(root, StubPackagePrefix, application, StubVersion)
 
 	err = internal.EnsureDirectory(dir)
 	if err != nil {
@@ -69,11 +92,12 @@ func Stub(application, service, method string) error {
 	var buf bytes.Buffer
 
 	err = tpl.Execute(&buf, stubData{
-		Application: application,
-		Version:     StubVersion,
-		Service:     service,
-		Method:      method,
-		GoPackage:   filepath.ToSlash(filepath.Join(module, dir)),
+		Package: strings.Join([]string{
+			StubPackagePrefix, application, StubVersion,
+		}, "."),
+		Service:   service,
+		Method:    method,
+		GoPackage: filepath.ToSlash(filepath.Join(module, dir)),
 		GoPackageName: fmt.Sprintf("%s%s",
 			strings.ReplaceAll(application, "_", ""), StubVersion),
 	})
@@ -82,7 +106,7 @@ func Stub(application, service, method string) error {
 	}
 
 	err = os.WriteFile(
-		filepath.Join(dir, "service.proto"),
+		filepath.Join(dir, serviceFileName),
 		buf.Bytes(), 0o600)
 	if err != nil {
 		return fmt.Errorf("write service file: %w", err)
@@ -120,7 +144,7 @@ func stubRoot() (string, error) {
 
 const stubTpl = `syntax = "proto3";
 
-package ttab.{{.Application}}.{{.Version}};
+package {{.Package}};
 
 option go_package = "{{.GoPackage}};{{.GoPackageName}}";
 
@@ -136,10 +160,11 @@ message {{.Method}}Response {}
 `
 
 type stubData struct {
-	Application string
-	Version     string
-	Service     string
-	Method      string
+	// Package is the full protobuf package, which the directory the file
+	// is written into mirrors.
+	Package string
+	Service string
+	Method  string
 	// GoPackage is the import path of the generated code.
 	GoPackage string
 	// GoPackageName names the Go package separately from the import path,

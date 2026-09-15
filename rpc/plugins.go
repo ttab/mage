@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/ttab/mage/internal"
@@ -75,46 +74,24 @@ const ElephantRPCPluginEnv = "ELEPHANT_RPC_PLUGIN"
 // the plain service interface itself.
 const interfaceOption = "interface"
 
-// elephantRPCOptions returns the options protoc-gen-elephant-rpc is run with:
-// whatever the magefile set, plus "interface=true" when nothing else emits
-// the plain service interface.
+// elephantRPCOptions returns the options protoc-gen-elephant-rpc is run with
+// for a shape: the repository's own, plus the interface option the shape
+// implies.
 //
-// The adapters take and return that interface, so something has to declare
-// it: protoc-gen-twirp does while a repository still generates Twirp, and
-// protoc-gen-elephant-rpc does when it does not. Following Twirp here is what
-// makes a Connect-only repository's generated code compile with no
-// configuration of its own. A magefile that sets the option itself keeps its
-// value, which is how a repository generates the interface before it stops
-// generating Twirp, or leaves it to a hand-written declaration.
-func elephantRPCOptions(conf config) []string {
+// The plugin's adapters take and return the plain protobuf service interface,
+// so exactly one generator has to declare it. For ShapeDualStack that is
+// protoc-gen-twirp, so the plugin is told not to; for ShapeConnect there is no
+// Twirp, so the plugin writes it. ShapeNative does not run the plugin at all.
+// checkInterfaceOwner refuses ElephantRPCOptions that tries to set the option
+// itself, since it would apply to every service and the shape is per service.
+func elephantRPCOptions(shape Shape) []string {
 	options := append([]string{}, ElephantRPCOptions...)
 
-	if conf.Twirp || hasOption(options, interfaceOption) {
+	if shape != ShapeConnect {
 		return options
 	}
 
 	return append(options, interfaceOption+"=true")
-}
-
-// hasOption reports whether a plugin option is set, as "name" or "name=value".
-func hasOption(options []string, name string) bool {
-	_, ok := optionValue(options, name)
-
-	return ok
-}
-
-// interfaceEnabled reports whether protoc-gen-elephant-rpc writes the plain
-// service interface on this run. A value that is not a boolean is left for
-// the plugin to complain about.
-func interfaceEnabled(conf config) bool {
-	value, ok := optionValue(elephantRPCOptions(conf), interfaceOption)
-	if !ok {
-		return false
-	}
-
-	on, err := strconv.ParseBool(value)
-
-	return err == nil && on
 }
 
 // optionValue returns the value of a plugin option and whether it was set at

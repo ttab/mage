@@ -4,7 +4,7 @@ package ttab.greeter.v1;
 
 option go_package = "github.com/ttab/rpcversionedfixture/rpc/greeter/v1;greeterv1";
 
-import "rpc/greeter/v1/types.proto";
+import "greeter/v1/types.proto";
 
 service Greeter {
   rpc Hello(HelloRequest) returns (HelloResponse);

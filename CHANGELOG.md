@@ -4,6 +4,129 @@ Everything from v0.10.0 onwards is documented here; earlier releases are not
 reconstructed. The entries are derived from the release tags, and the linked
 pull requests hold the detail.
 
+## [v0.15.0] - Unreleased
+
+**Breaking (repositories whose protobuf sources live under `rpc`):** the buf
+module root moves from the repository root to the proto root, because buf
+checks a file's package against its directory relative to the module root and
+resolves an `import` against the same root — `elephant.collab.v1` in
+`rpc/elephant/collab/v1` only passes `PACKAGE_DIRECTORY_MATCH` from a module
+rooted in `rpc`. Two things follow for such a repository, and both of them
+have to be dealt with in the commit that bumps this module. An `import` inside
+a `.proto` is now written relative to the proto root, so
+`import "rpc/greeter/types.proto"` becomes `import "greeter/types.proto"`;
+generation fails with `imported file does not exist` until it is. And buf now
+names the file `greeter/service.proto` rather than `rpc/greeter/service.proto`,
+which is part of what `protoc-gen-go` writes: the descriptor variable is
+`File_greeter_service_proto` where it was `File_rpc_greeter_service_proto`, and
+the same rename runs through the generated file's unexported symbols, so
+`rpc:generate` produces a large diff and anything naming a file descriptor
+directly has to follow it — `service.twirp.go` embeds the same descriptor, so
+it changes too. None of that reaches the service's callers: a file's name is
+independent of its `package`, so the message and service full names, the RPC
+paths and the encoding are untouched, and the only exported symbol that moves
+is the descriptor variable. The cost is a regeneration diff, not a release
+coordinated with anybody calling the service. The generated files themselves
+stay exactly where they were, next to the declaration they came from. The `buf.yaml` the targets write is
+part of the bump and has to be committed: `rpc:breaking` compares against it
+on both sides. That comparison cannot pass on the bump commit itself, since
+the state being compared against has no `buf.yaml` and names its files from
+the repository root, so buf reports every declaration in the repository as
+deleted; no other input helps, every earlier state has the same problem, and
+`rpc:breaking` says so rather than reporting the deletions. Skip that check on
+the bump's pull request. A repository whose proto root *is* the repository
+root, which is elephant-api, is unaffected: it needs no `buf.yaml` and still
+gets none.
+
+**Behaviour change (what a versioned declaration generates):** a service now
+has one of three shapes — `rpc.ShapeDualStack`, which serves Connect and the
+`/twirp/` paths on the plain protobuf service interface; `rpc.ShapeConnect`,
+which serves Connect only on that same interface; and `rpc.ShapeNative`, which
+serves Connect only on connect-go's own generated handler interface and is the
+one shape that may declare streaming methods. The layout picks the default and
+`rpc.Shapes` overrides it per service. A declaration in the flat layout
+defaults to `ShapeDualStack` while Twirp is on and `ShapeConnect` when it is
+off, which is what it generated before either way. A declaration whose own
+directory is a version defaults to `ShapeNative`, so it gets `protoc-gen-go`
+and `protoc-gen-connect-go` only: no `<package>connect/service.elephant.go`, no
+`service.rpc.go` and no `service.twirp.go`. **A service already in the
+versioned layout that still serves the `/twirp/` paths therefore loses its
+adapters and its plain interface on the next `rpc:generate` unless
+`rpc.Shapes` names it `ShapeDualStack`.** Regeneration removes what is no
+longer generated, the adapters included, since they take and return an
+interface that would no longer be declared.
+
+**Behaviour change (`rpc:stub`):** a stub is written to
+`<proto root>/elephant/<application>/v1/service.proto` with the package
+`elephant.<application>.v1`, where it was `<proto root>/<application>/v1` with
+the package `ttab.<application>.v1`, and the service gets the `Service` suffix
+if the caller left it out. The old layout failed `buf lint` on
+`PACKAGE_DIRECTORY_MATCH` and `SERVICE_SUFFIX`; a fresh stub now passes the
+`STANDARD` rules with no exemptions.
+
+**Behaviour change (a committed `buf.yaml` this package wrote):** the comment
+header the generated `buf.yaml` carries has been rewritten, so the next
+`rpc:generate` or `rpc:vendorProto` in a repository that already commits one —
+elephant-public-api and elephant-tt-api — rewrites the file. The modules it
+declares, and the generated Go, are unchanged.
+
+Changes:
+
+- Three new targets, all running the pinned buf and all scoped to the
+  repository's own declarations, so a vendored proto is compiled as an import
+  and never checked against rules that belong to the repository it came from.
+  `rpc:lint` runs `buf lint`. `rpc:breaking` runs `buf breaking` against
+  `rpc.BreakingAgainst`/`RPC_BREAKING_AGAINST`, which defaults to
+  `.git#branch=main`, and reports a repository with no git history or a
+  differently named trunk by name rather than as a buf failure — note that
+  `buf.yaml` has to be committed for the two sides of the comparison to name
+  their files the same way. The branch is resolved against the checkout the
+  target runs in and compared against as `origin/<branch>` when that is all the
+  checkout has, which is what a CI checkout is; the history still has to be
+  there, so a workflow that runs the target checks out with
+  `fetch-depth: 0`. `rpc:format` rewrites the declarations in buf's
+  formatting and `rpc:formatCheck` reports what it would rewrite without
+  touching anything, which is what a CI job runs.
+- `rpc.Shapes`, with the `RPC_SHAPES` override, sets a service's shape by
+  directory and overrides what its layout would imply. It goes both ways, and
+  the second direction is the point: a versioned service can be held at
+  `ShapeDualStack` while it still has Twirp callers, and an existing
+  flat-layout service can be moved to `ShapeNative` or `ShapeConnect` where it
+  stands. A service's proto package is in its procedure path and the versioned
+  layout is what puts a version in the package, so a service that could only
+  reach `ShapeNative` by moving directory would have to break every caller's
+  path to get there; naming it here changes what it generates and nothing
+  else. Retiring Twirp is the same story one shape down — `rpc.Twirp` is a
+  repository-wide default, and `ShapeConnect` is how one service leaves it
+  without waiting for the rest. A key naming no discovered service, or a shape
+  that is not one of the three, is an error rather than a setting with no
+  effect.
+- `rpc.ElephantRPCOptions` may no longer set the plugin's `interface` option.
+  Which generator declares the plain service interface follows the shape, and
+  the option applies to every service at once, so it could only contradict a
+  per-service shape. Generation refuses it and names `rpc.Shapes` instead.
+  Nothing in the fleet set it.
+- Service discovery finds a `service.proto` at any depth under the proto root
+  rather than only one or two directories down, which is what a declaration
+  mirroring a package with a prefix in it — `elephant.<app>.v1` in
+  `rpc/elephant/<app>/v1` — needs. It skips `vendor`, `node_modules` and
+  `testdata` directories and anything beginning with a dot, so neither a
+  dependency's checkout nor a test fixture is mistaken for the repository's own
+  declaration. A declaration two directories down whose own directory is not a
+  version — `rpc/hub/views/service.proto` — used to be skipped entirely and is
+  now generated for, as a flat service named after its directory.
+- Generation is two buf runs when a repository holds both service shapes, since
+  the two plugin lists differ and buf takes one template per run. A shape with
+  no services in it is not run at all.
+- `buf.yaml` is now written for any repository with a proto root under `rpc`,
+  not only for one that has vendored a proto. A hand-written `buf.yaml` is
+  still left alone, and is now also checked for declaring the proto root as the
+  module root: one that declares `- path: .` for a repository whose sources are
+  under `rpc` generated fine before and is now refused, by `rpc:generate` and
+  by every check, until it names the proto root instead.
+- The README documents both service shapes, the layout rule and the new
+  targets.
+
 ## [v0.14.0] - 2026-09-07
 
 **Behaviour change (generated code):** the sqltools image moves from v0.1.3 to

@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package elephant.collab.v1;
+
+option go_package = "github.com/ttab/rpcnativefixture/rpc/elephant/collab/v1;collabv1";
+
+import "elephant/collab/v1/types.proto";
+
+service CollaborationService {
+  rpc Snapshot(SnapshotRequest) returns (SnapshotResponse);
+
+  // A streaming method, which is the point of the fixture: it is only
+  // declarable because nothing of ours has to fit a stream into a signature
+  // that returns one response, so protoc-gen-elephant-rpc and
+  // protoc-gen-twirp must not be run over this declaration.
+  rpc StreamSessionUpdates(StreamSessionUpdatesRequest)
+      returns (stream SessionUpdate);
+}
+
+// SnapshotRequest asks for the current state of a session.
+message SnapshotRequest {
+  // Session to snapshot.
+  string session = 1;
+}
+
+// SnapshotResponse carries the state of a session.
+message SnapshotResponse {
+  // State of the session.
+  SessionState state = 1;
+}
+
+// StreamSessionUpdatesRequest subscribes to a session.
+message StreamSessionUpdatesRequest {
+  // Session to follow.
+  string session = 1;
+}
