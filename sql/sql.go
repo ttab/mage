@@ -98,6 +98,18 @@ func SqlcConfig() error {
 	return nil
 }
 
+// Create a new database migration in "./schema".
+func NewMigration(name string) error {
+	tern := TernCommand()
+
+	err := tern("new", "--migrations", "schema", name)
+	if err != nil {
+		return fmt.Errorf("new migrations: %w", err)
+	}
+
+	return nil
+}
+
 // Migrate the database to the latest version using the migrations in
 // "./schema".
 func Migrate() error {
