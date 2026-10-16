@@ -51,10 +51,13 @@ func SqlcCommand() func(args ...string) error {
 // SqlcCommand returns a command function that runs tern in docker with host
 // networking and the current working directory mounted.
 func TernCommand() func(args ...string) error {
+	uid := os.Getuid()
+	gid := os.Getgid()
 	cwd := internal.MustGetWD()
 
 	return sh.RunCmd("docker", "run", "--rm",
 		"-v", fmt.Sprintf("%s:/usr/src", cwd),
+		"-u", fmt.Sprintf("%d:%d", uid, gid),
 		"--network", "host",
 		sqlTools, "tern",
 	)
