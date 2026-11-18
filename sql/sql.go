@@ -50,12 +50,13 @@ func SqlcCommand() func(args ...string) error {
 
 // SqlcCommand returns a command function that runs tern in docker with host
 // networking and the current working directory mounted.
-func TernCommand() func(args ...string) error {
+func TernCommand() func(args ...string) (string, error) {
 	uid := os.Getuid()
 	gid := os.Getgid()
 	cwd := internal.MustGetWD()
 
-	return sh.RunCmd("docker", "run", "--rm",
+	return sh.OutCmd("docker", "run", "--rm",
+		"-e", fmt.Sprintf("USER=%d", uid),
 		"-v", fmt.Sprintf("%s:/usr/src", cwd),
 		"-u", fmt.Sprintf("%d:%d", uid, gid),
 		"--network", "host",
@@ -105,9 +106,9 @@ func SqlcConfig() error {
 func NewMigration(name string) error {
 	tern := TernCommand()
 
-	err := tern("new", "--migrations", "schema", name)
+	_, err := tern("new", "--migrations", "schema", name)
 	if err != nil {
-		return fmt.Errorf("new migrations: %w", err)
+		return fmt.Errorf("new migration: %w", err)
 	}
 
 	return nil
@@ -119,7 +120,7 @@ func Migrate() error {
 	connString := MustGetConnString()
 	tern := TernCommand()
 
-	err := tern("migrate", "--migrations", "schema",
+	_, err := tern("migrate", "--migrations", "schema",
 		"--conn-string", connString)
 	if err != nil {
 		return fmt.Errorf("run migration: %w", err)
@@ -138,7 +139,7 @@ func Rollback(to int) error {
 	connString := MustGetConnString()
 	tern := TernCommand()
 
-	err := tern("migrate", "--migrations", "schema",
+	_, err := tern("migrate", "--migrations", "schema",
 		"--conn-string", connString,
 		"--destination", strconv.Itoa(to))
 	if err != nil {
