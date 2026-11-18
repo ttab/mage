@@ -4,7 +4,30 @@ Everything from v0.10.0 onwards is documented here; earlier releases are not
 reconstructed. The entries are derived from the release tags, and the linked
 pull requests hold the detail.
 
-## [v0.15.0] - Unreleased
+## [v0.16.2] - 2026-11-18
+
+**Behaviour change (`s3:minio`):** MinIO has withdrawn its container images,
+so the pinned `minio/minio` image can no longer be pulled and the target
+failed on any machine without it cached. The target now runs RustFS
+(`rustfs/rustfs:1.0.6`, exported as `s3.RustFSImage`) under the same name,
+ports and `minioadmin`/`minioadmin` credentials, so magefiles and service
+configuration need no change. RustFS cannot read MinIO's on-disk format, so it
+starts from a fresh data directory, `local-rustfs`, next to the old
+`local-minio` one; recreate your buckets with `s3:bucket`, and delete the old
+directory once nothing in it is needed. The web console has moved to
+http://localhost:9001/rustfs/console/.
+
+## [v0.16.1] - 2026-10-16
+
+- `sql:newMigration` runs tern as the calling user, so the migration file it
+  writes is no longer owned by root.
+
+## [v0.16.0] - 2026-10-16
+
+- New `sql:newMigration "name"` target, which creates a new tern migration in
+  `./schema`. (#19)
+
+## [v0.15.0] - 2026-09-15
 
 **Breaking (repositories whose protobuf sources live under `rpc`):** the buf
 module root moves from the repository root to the proto root, because buf
