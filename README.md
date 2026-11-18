@@ -395,6 +395,11 @@ DropDB calls DropDBWithName using the current directory name as the database nam
 
 Drops the database and login role with the given name.
 
+### `sql:status`
+
+Prints the migration status of the database: its current version and the
+migrations in "./schema" that have not been applied.
+
 ### `sql:migrate`
 
 Migrate the database to the latest version using the migrations in "./schema".
