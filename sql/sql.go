@@ -48,20 +48,34 @@ func SqlcCommand() func(args ...string) error {
 	)
 }
 
-// SqlcCommand returns a command function that runs tern in docker with host
-// networking and the current working directory mounted.
-func TernCommand() func(args ...string) (string, error) {
+// TernCommand returns a command function that runs tern in docker with host
+// networking and the current working directory mounted. tern's output is only
+// shown when mage runs in verbose mode.
+func TernCommand() func(args ...string) error {
+	return sh.RunCmd("docker", ternDockerArgs()...)
+}
+
+// TernCommandOutput is TernCommand for when tern's output is the result: the
+// command function returns what tern wrote to stdout.
+func TernCommandOutput() func(args ...string) (string, error) {
+	return sh.OutCmd("docker", ternDockerArgs()...)
+}
+
+func ternDockerArgs() []string {
 	uid := os.Getuid()
 	gid := os.Getgid()
 	cwd := internal.MustGetWD()
 
-	return sh.OutCmd("docker", "run", "--rm",
+	return []string{
+		"run", "--rm",
+		// The UID has no passwd entry in the image, and tern is built
+		// without cgo, so it fails to load its config unless USER is set.
 		"-e", fmt.Sprintf("USER=%d", uid),
 		"-v", fmt.Sprintf("%s:/usr/src", cwd),
 		"-u", fmt.Sprintf("%d:%d", uid, gid),
 		"--network", "host",
 		sqlTools, "tern",
-	)
+	}
 }
 
 // Generate uses sqlc to compile the SQL queries in postgres/queries.sql to Go,
@@ -106,7 +120,7 @@ func SqlcConfig() error {
 func NewMigration(name string) error {
 	tern := TernCommand()
 
-	_, err := tern("new", "--migrations", "schema", name)
+	err := tern("new", "--migrations", "schema", name)
 	if err != nil {
 		return fmt.Errorf("new migration: %w", err)
 	}
@@ -120,7 +134,7 @@ func Migrate() error {
 	connString := MustGetConnString()
 	tern := TernCommand()
 
-	_, err := tern("migrate", "--migrations", "schema",
+	err := tern("migrate", "--migrations", "schema",
 		"--conn-string", connString)
 	if err != nil {
 		return fmt.Errorf("run migration: %w", err)
@@ -139,7 +153,7 @@ func Rollback(to int) error {
 	connString := MustGetConnString()
 	tern := TernCommand()
 
-	_, err := tern("migrate", "--migrations", "schema",
+	err := tern("migrate", "--migrations", "schema",
 		"--conn-string", connString,
 		"--destination", strconv.Itoa(to))
 	if err != nil {
@@ -154,9 +168,11 @@ func Rollback(to int) error {
 	return nil
 }
 
+// Status prints the migration status of the database: its current version
+// and the migrations in "./schema" that have not been applied.
 func Status() error {
 	connString := MustGetConnString()
-	tern := TernCommand()
+	tern := TernCommandOutput()
 
 	out, err := tern("status", "--migrations", "schema",
 		"--conn-string", connString)
@@ -164,7 +180,10 @@ func Status() error {
 		return fmt.Errorf("check status: %w", err)
 	}
 
-	fmt.Print(out)
+	_, err = os.Stdout.WriteString(out)
+	if err != nil {
+		return fmt.Errorf("write status: %w", err)
+	}
 
 	return nil
 }

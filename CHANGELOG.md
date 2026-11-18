@@ -4,6 +4,17 @@ Everything from v0.10.0 onwards is documented here; earlier releases are not
 reconstructed. The entries are derived from the release tags, and the linked
 pull requests hold the detail.
 
+## [v0.16.3] - Unreleased
+
+- `sql:migrate`, `sql:rollback` and `sql:newMigration` work again. Since
+  v0.16.1 tern has run as the calling user, who has no passwd entry in the
+  sqltools image, and every tern command failed with `user: Current requires
+  cgo or $USER set in environment`. (#20)
+- New `sql:status` target, which prints the database's migration version and
+  the migrations in `./schema` that have not been applied. Library callers get
+  `sql.TernCommandOutput`, which returns tern's output instead of only
+  printing it in verbose mode. (#20)
+
 ## [v0.16.2] - 2026-11-18
 
 **Behaviour change (`s3:minio`):** MinIO has withdrawn its container images,
