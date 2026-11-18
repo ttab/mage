@@ -4,7 +4,7 @@ Everything from v0.10.0 onwards is documented here; earlier releases are not
 reconstructed. The entries are derived from the release tags, and the linked
 pull requests hold the detail.
 
-## [v0.16.3] - Unreleased
+## [v0.17.0] - 2026-11-18
 
 - `sql:migrate`, `sql:rollback` and `sql:newMigration` work again. Since
   v0.16.1 tern has run as the calling user, who has no passwd entry in the
