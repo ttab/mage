@@ -407,6 +407,10 @@ Display the current migration status.
 
 Migrate the database to the latest version using the migrations in "./schema".
 
+### `sql:newMigration` "name"
+
+Creates a new, empty tern migration called "name" in "./schema", numbered after the existing ones.
+
 ### `sql:vendorAdd` "module" "dir"
 
 Declares a library's tern migration directory in `schema/vendor.json`, so that
@@ -490,15 +494,15 @@ func GrantReporting(ctx context.Context) error {
 
 ### `s3:minio`
 
-Minio creates a local minio instance using docker. Data will be stored under the platform data directory (e.g. `~/.local/share/tt-mage/local-minio` on Linux, `~/Library/tt-mage/local-minio` on macOS).
+Creates a local S3-compatible instance using docker. MinIO no longer publishes container images, so despite the target's name it runs [RustFS](https://github.com/rustfs/rustfs), pinned as `s3.RustFSImage`. The container is `local-rustfs`, and a leftover `local-minio` container is stopped so that it does not hold the port. Data will be stored under the platform data directory (e.g. `~/.local/share/tt-mage/local-rustfs` on Linux, `~/Library/tt-mage/local-rustfs` on macOS).
 
-Exposes an S3 compatible endpoint on http://localhost:9000 and a web GUI on http://localhost:9001.
+Exposes an S3 compatible endpoint on http://localhost:9000 and a web GUI on http://localhost:9001/rustfs/console/.
 
 Use minioadmin/minioadmin to log in, or as access key/secret for the API.
 
 ### `s3:bucket` "name"
 
-Creates a bucket in the local minio instance.
+Creates a bucket in the local instance started by `s3:minio`.
 
 ## Documentation tasks
 
