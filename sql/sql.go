@@ -154,6 +154,21 @@ func Rollback(to int) error {
 	return nil
 }
 
+func Status() error {
+	connString := MustGetConnString()
+	tern := TernCommand()
+
+	out, err := tern("status", "--migrations", "schema",
+		"--conn-string", connString)
+	if err != nil {
+		return fmt.Errorf("check status: %w", err)
+	}
+
+	fmt.Print(out)
+
+	return nil
+}
+
 // DumpSchema writes the current database schema to "./postgres/schema.sql".
 func DumpSchema() error {
 	connString := MustGetConnString()
