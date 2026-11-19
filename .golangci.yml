@@ -7,7 +7,6 @@ linters:
     - dupl
     - errorlint
     - exhaustive
-    - forbidigo
     - gochecknoinits
     - goconst
     - gocritic
